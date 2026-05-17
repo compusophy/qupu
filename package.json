@@ -1,0 +1,13 @@
+{
+  "name": "qupu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wasm-pack build --target web --release --out-dir web/pkg",
+    "build:dev": "wasm-pack build --target web --dev --out-dir web/pkg",
+    "start": "node server.mjs",
+    "dev": "npm run build && npm run start",
+    "smoke": "node smoke.mjs"
+  }
+}
