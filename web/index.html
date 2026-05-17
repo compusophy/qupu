@@ -4,128 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>QuPU // virtual quantum processing unit</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; width: 100%; background: #060810; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+    #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #00ffd1; font: 13px ui-monospace, monospace; letter-spacing: 0.1em; pointer-events: none; }
+  </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-dot"></span>
-      <span class="brand-name">QuPU</span>
-      <span class="brand-tag">virtual quantum processing unit</span>
-    </div>
-    <div class="brand-sub">
-      <span id="coherence-banner" data-kind="ok">// coherent</span>
-      <span class="sep">·</span>
-      <span>rust → wasm · web workers · stable rust 1.94</span>
-    </div>
-  </header>
-
-  <main class="grid">
-    <!-- LEFT COLUMN -->
-    <section class="panel panel-die">
-      <div class="panel-head">
-        <h2>die</h2>
-        <span class="panel-meta"><span id="stat-cores">—</span> cores</span>
-      </div>
-      <div id="die" class="die"></div>
-      <p class="hint">Each core is an independent Web Worker holding its own WASM instance. Activity bars fill while a kernel tile is in flight.</p>
-    </section>
-
-    <section class="panel panel-telemetry">
-      <div class="panel-head"><h2>telemetry</h2><span class="panel-meta">live</span></div>
-      <dl class="telemetry">
-        <dt>qubits</dt><dd id="stat-qubits">—</dd>
-        <dt>amplitudes</dt><dd id="stat-amps">—</dd>
-        <dt>gates applied</dt><dd id="stat-gates">0</dd>
-        <dt>wall time</dt><dd id="stat-wall">0 ms</dd>
-        <dt>parallel speedup</dt><dd id="stat-speedup">—</dd>
-        <dt>state norm</dt><dd id="stat-norm">1.00000000</dd>
-      </dl>
-    </section>
-
-    <section class="panel panel-config">
-      <div class="panel-head"><h2>config</h2></div>
-      <label class="field">
-        <span>register width</span>
-        <select id="qubits-sel"></select>
-      </label>
-      <div class="footnote">Increasing qubits doubles the state vector size. Tile alignment caps parallelism for the top qubit at 1 core — this matches how distributed QPU simulators behave on real hardware.</div>
-    </section>
-
-    <!-- RIGHT COLUMN -->
-    <section class="panel panel-state">
-      <div class="panel-head">
-        <h2>state vector</h2>
-        <span class="panel-meta">size = magnitude · hue = phase</span>
-      </div>
-      <div id="state" class="state"></div>
-    </section>
-
-    <section class="panel panel-circuit">
-      <div class="panel-head">
-        <h2>circuit</h2>
-        <span class="panel-meta" id="ops">0 ops</span>
-      </div>
-      <div class="circuit-wrap">
-        <svg id="circuit" xmlns="http://www.w3.org/2000/svg"></svg>
-      </div>
-    </section>
-
-    <section class="panel panel-toolbar">
-      <div class="panel-head"><h2>compose</h2></div>
-      <div class="toolbar" id="toolbar">
-        <div class="gate-group">
-          <span class="group-label">1q</span>
-          <button data-gate="H">H</button>
-          <button data-gate="X">X</button>
-          <button data-gate="Y">Y</button>
-          <button data-gate="Z">Z</button>
-          <button data-gate="S">S</button>
-          <button data-gate="T">T</button>
-        </div>
-        <div class="gate-group">
-          <span class="group-label">rot</span>
-          <button data-gate="RX">RX</button>
-          <button data-gate="RY">RY</button>
-          <button data-gate="RZ">RZ</button>
-        </div>
-        <div class="gate-group">
-          <span class="group-label">2q</span>
-          <button data-gate="CNOT">CNOT</button>
-          <button data-gate="CZ">CZ</button>
-          <button data-gate="SWAP">SWAP</button>
-        </div>
-        <div class="gate-group fields">
-          <label>target <select id="target-sel"></select></label>
-          <label>ctrl <select id="ctrl-sel"></select></label>
-          <label>θ <input id="theta-input" type="number" step="0.0001" value="1.5708" /></label>
-        </div>
-        <div class="gate-group actions">
-          <button id="run-btn" class="primary">▶ run</button>
-          <button id="step-btn">▷ step</button>
-          <button id="reset-btn">↺ reset</button>
-          <button id="clear-btn">⌫ clear</button>
-        </div>
-        <div class="gate-group presets" id="presets">
-          <span class="group-label">presets</span>
-          <button data-preset="Bell">Bell</button>
-          <button data-preset="GHZ">GHZ</button>
-          <button data-preset="QFT">QFT</button>
-          <button data-preset="Grover">Grover</button>
-          <button data-preset="Scramble">Scramble</button>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer class="bottombar">
-    <span>QuPU · single-page WASM playground</span>
-    <span>state vector lives in a SharedArrayBuffer; each gate is fanned out across CPU worker threads</span>
-  </footer>
-
-  <script type="module" src="./main.js"></script>
+  <canvas id="qupu_canvas"></canvas>
+  <div id="loading">// booting qupu kernel</div>
+  <script type="module">
+    import init, { start } from './pkg/qupu.js';
+    await init();
+    document.getElementById('loading').remove();
+    start('qupu_canvas');
+  </script>
 </body>
 </html>
