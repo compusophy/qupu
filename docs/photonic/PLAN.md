@@ -1141,7 +1141,8 @@ bibliographic details before citing externally.**
 
 | Parameter | Nominal | Range | Source / confidence |
 |---|---|---|---|
-| Group index n_g (Si strip, C-band) | 4.3 | 4.1–4.5 | [K] typical |
+| Group index n_g (Si strip, C-band) | 4.3 | 4.1–4.5 | [K] typical. **Measured 4.186 ± 0.004** on 8 fabricated rings (openEBL 2024-10, `measured_rings.py`). Figures here still use 4.3, which understates FSR by ≈ 3 % |
+| Ring FWHM at R = 3–5 µm, gap 70–90 nm | — | — | **Measured 27–45 GHz** (Q_L 4.3 k–7.1 k): already inside the 25–40 GHz design window. R = 3 µm gives FSR 3.82 THz → 38 channels at 100 GHz |
 | dλ/dT | 70 pm/K | 60–85 | [K] |
 | Ring radius | 3.3 µm | 2–5 | Design |
 | Ring FWHM | 25 GHz | 25–40 | Design, from signal bandwidth |
