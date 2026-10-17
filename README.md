@@ -88,3 +88,9 @@ happen.
   works but the grid cells shrink past readability.
 - The Grover preset uses an exact Toffoli decomposition only for n=3 and a
   rough CZ-ladder proxy for larger n.
+
+## Related
+
+- [`docs/photonic/PLAN.md`](docs/photonic/PLAN.md) — project plan for a
+  browser-based microring-resonator optical computing simulator (with a
+  reproducible back-of-envelope calculator in `docs/photonic/estimates.py`).
