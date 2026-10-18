@@ -10,9 +10,11 @@
 //!   * `process` — coupling-vs-gap law, loss, n_g; leave-one-out check
 //!   * `core`    — broadcast-and-weight core on a femtosecond clock
 //!   * `gpu`     — every symbol of the core on the GPU (wgpu), with a CPU twin
+//!   * `econ`    — first-principles cost, energy and embodied energy vs GPUs
 //!   * `web`     — the browser view (wasm32 only)
 
 pub mod core;
+pub mod econ;
 pub mod fit;
 pub mod gpu;
 pub mod matfile;

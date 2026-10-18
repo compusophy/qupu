@@ -22,11 +22,13 @@ and measured by SiEPIC's automated test station. It is bundled in
 
 ```sh
 cargo run --release                       # fit report, leave-one-out check, predictions
-cargo run --release -- core               # core accuracy / energy / simulator speed
+cargo run --release -- core               # core accuracy / energy / simulator speed (CPU)
+cargo run --release -- gpu                # verify the wgpu kernel against its f64 twin; GPU throughput
+cargo run --release -- econ               # first-principles cost / energy vs NVIDIA, AMD, Intel
 cargo run --release --example patterns    # calibration quality per weight pattern
-cargo test --release                      # 10 unit + 5 acceptance tests
+cargo test --release                      # 13 unit + 5 acceptance + 1 GPU test
 
-./build.sh                                # browser view → web/pkg (needs wasm-bindgen-cli 0.2.104)
+./build.sh                                # browser view → web/pkg (needs wasm-bindgen-cli 0.2.129)
 WEB_ROOT=studio/web node server.mjs       # from the repo root, then http://localhost:8080
 ```
 
@@ -99,6 +101,35 @@ What the table shows:
   to fail there.
 - **Energy:** heaters are the largest term. Converter energy per MAC falls as
   the core grows, as in docs/photonic/PLAN.md §6.
+
+## GPU path (wgpu)
+
+`src/gpu.rs` computes every symbol on the GPU in one WGSL kernel:
+workload generation, effective-weight dot products, receiver noise, ADC,
+weight-mapping correction and error accumulation. Up to 4 M symbols go in
+each dispatch. It runs on Vulkan, Metal or DX12 natively, and on WebGPU in
+the browser, where the page shows "GPU · 100 % of symbols". Without WebGPU
+it falls back to CPU sampling.
+
+`cpu_twin` replays the same arithmetic in f64 with the same hash RNG.
+Measured agreement at 16×16, 32×32 and 64×64, with noise on and off:
+
+- **ENOB:** within 0.00001 bits.
+- **Final outputs:** identical (0 LSB difference).
+- **Against the original CPU core path:** 5.708 vs 5.707 bits over 100 000
+  symbols.
+
+This container has no GPU, so the throughput measured here is on llvmpipe
+(Mesa's software Vulkan): 2.4 M symbols/s at 16×16, already 4× the CPU path.
+Run `cargo run --release -- gpu` on real hardware to get its numbers.
+
+## Economics
+
+`src/econ.rs` reduces every optical engine to energy per MAC ≈
+E_in/fan-out + E_out/fan-in + light + static + memory. It then compares
+cost to build, 3-year TCO, manufacturing energy and the idiot index
+against H100, B200, MI300X and Gaudi 3. Findings are in
+[docs/photonic/FIRST_PRINCIPLES.md](../docs/photonic/FIRST_PRINCIPLES.md).
 
 ## What is fitted and what is assumed
 

@@ -3,6 +3,7 @@
 //!   cargo run --release            fit the bundled measured rings, run the
 //!                                  leave-one-out check, print predictions
 //!   cargo run --release -- core    benchmark the core simulator (CPU)
+//!   cargo run --release -- econ    first-principles cost and energy vs GPUs
 //!   cargo run --release -- gpu     verify the GPU kernel against its CPU
 //!                                  twin, then benchmark every-symbol speed
 
@@ -18,6 +19,7 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("core") => bench_core(),
         Some("gpu") => bench_gpu(),
+        Some("econ") => econ(),
         Some("resonances") => resonances(),
         _ => report(),
     }
@@ -312,4 +314,78 @@ fn si(v: f64) -> String {
         .find(|(d, _)| v >= *d)
         .unwrap_or((1.0, ""));
     format!("{:.2} {u}", v / d)
+}
+
+fn econ() {
+    use studio::econ::{engines, incumbents, sensitivity, World};
+    let w = World::default();
+    println!(
+        "First-principles economics. Electricity ${}/kWh, PUE {}, {} years at full power;",
+        w.usd_per_kwh, w.pue, w.years
+    );
+    println!(
+        "silicon ${}/kg, glass ${}/kg. Incumbent COGS: third-party estimates (±20 %).\n",
+        w.si_usd_per_kg, w.glass_usd_per_kg
+    );
+    let mut all = incumbents(&w);
+    all.extend(engines().iter().map(|e| e.system(&w)));
+    println!(
+        "{:<27} {:<10} {:>8} {:>7} {:>7} {:>8} {:>9} {:>9} {:>10} {:>9} {:>7} {:>7}",
+        "system",
+        "precision",
+        "PMAC/s",
+        "W",
+        "fJ/MAC",
+        "COGS $",
+        "TMAC/s/$",
+        "3y TCO $",
+        "PMAC/s/k$",
+        "kWh made",
+        "raw $",
+        "idiot"
+    );
+    for s in &all {
+        println!("{:<27} {:<10} {:>8.3} {:>7.0} {:>7.0} {:>8.0} {:>9.3} {:>9.0} {:>10.3} {:>9.1} {:>7.2} {:>7.0}",
+            s.name, s.precision.split(' ').next().unwrap_or(""), s.macs_per_s / 1e15, s.power_w, s.pj_per_mac() * 1e3, s.cogs(),
+            s.macs_per_s / s.cogs() / 1e12, s.tco(&w), s.macs_per_s / s.tco(&w) / 1e12, s.embodied_kwh, s.raw_material_usd, s.idiot_index());
+    }
+    println!(
+        "\nidiot = manufacturing cost ÷ raw-material cost. kWh made = manufacturing electricity."
+    );
+    println!("Analog ≈5–6 bit is not FP8: equal task accuracy is unproven and is the first thing to test.");
+
+    for e in engines() {
+        let s = e.system(&w);
+        println!("\n{} — {} ({})", e.name, e.precision, e.basis);
+        println!("  {:.0} engines · fan-in {:.0} · fan-out {:.0} · {:.1} GBd · {:.2} PMAC/s · {:.0} W · ${:.0}",
+            e.units, e.fan_in, e.fan_out, e.baud / 1e9, s.macs_per_s / 1e15, s.power_w, s.cogs());
+        let total = s.cogs();
+        let mut cost = s.cost.clone();
+        cost.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let cs: Vec<String> = cost
+            .iter()
+            .filter(|(_, v)| *v > 0.0)
+            .map(|(k, v)| format!("{k} {:.0} %", 100.0 * v / total))
+            .collect();
+        println!("  cost:   {}", cs.join(", "));
+        let parts = e.power_parts();
+        let pt: f64 = parts.iter().map(|(_, p)| p).sum();
+        let ps: Vec<String> = parts
+            .iter()
+            .filter(|(_, p)| *p > 0.0)
+            .map(|(k, p)| format!("{k} {:.0} %", 100.0 * p / pt))
+            .collect();
+        println!("  power:  {}", ps.join(", "));
+        println!(
+            "  converter floor: {:.1} fJ/MAC (ideal light, no static power)",
+            e.converter_floor_fj()
+        );
+        println!("  what moves it (low ↔ high):  TMAC/s per $        fJ/MAC");
+        for (name, [lo, hi]) in sensitivity(&e, &w) {
+            println!(
+                "    {:<34} {:>7.2} ↔ {:<7.2}  {:>6.1} ↔ {:<6.1}",
+                name, lo.0, hi.0, lo.1, hi.1
+            );
+        }
+    }
 }

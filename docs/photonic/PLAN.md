@@ -2,6 +2,14 @@
 
 *Working draft v0.1 · 2026-10-17 · companion calculator: [`estimates.py`](estimates.py)*
 
+> **Update 2026-10-18.** A first-principles cost model
+> ([FIRST_PRINCIPLES.md](FIRST_PRINCIPLES.md)) finds that the ring core
+> below is roughly at parity with GPUs per dollar and per joule. WDM fan-in
+> is capped near 38 channels, which leaves a converter floor of about 100
+> fJ/MAC. A free-space "glass engine" with fan-in of about 1000 is the
+> stronger candidate. The ring work stays as the measured, fab-ready
+> foundation.
+
 **How to read this document.**
 Every number below comes from a stated assumption, and the calculator
 reproduces every derived figure (`python3 docs/photonic/estimates.py`).
