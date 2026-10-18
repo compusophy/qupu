@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Build the browser view into web/pkg. Serve with:
+# Build the browser view into web/pkg (needs wasm-bindgen-cli 0.2.129). Serve with:
 #   WEB_ROOT=studio/web node server.mjs     (from the repo root)
 set -e
 cd "$(dirname "$0")"

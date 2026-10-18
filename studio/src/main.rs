@@ -2,7 +2,9 @@
 //!
 //!   cargo run --release            fit the bundled measured rings, run the
 //!                                  leave-one-out check, print predictions
-//!   cargo run --release -- core    benchmark the core simulator
+//!   cargo run --release -- core    benchmark the core simulator (CPU)
+//!   cargo run --release -- gpu     verify the GPU kernel against its CPU
+//!                                  twin, then benchmark every-symbol speed
 
 use studio::fit::{fit_device, DeviceFit};
 use studio::measure::Measurement;
@@ -15,6 +17,7 @@ const MAX_Q_ERROR: f64 = 0.15;
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("core") => bench_core(),
+        Some("gpu") => bench_gpu(),
         Some("resonances") => resonances(),
         _ => report(),
     }
@@ -195,4 +198,118 @@ fn bench_core() {
         "Ring optics: fitted. Heater, noise, converter and laser figures: plan assumptions [A]."
     );
     println!("Simulator: one CPU thread, every symbol computed (noise, ADC, error); no GPU yet.");
+}
+
+fn bench_gpu() {
+    use studio::core::{Core, CoreConfig, Pattern};
+    use studio::gpu::{cpu_twin, Batch, Gpu, MAX_SYMBOLS};
+    let mut gpu = match pollster::block_on(Gpu::new()) {
+        Ok(g) => g,
+        Err(e) => {
+            println!("GPU unavailable: {e}");
+            return;
+        }
+    };
+    println!("Adapter: {}\n", gpu.adapter);
+    let samples: Vec<Sample> = Measurement::bundled()
+        .iter()
+        .map(fit_device)
+        .map(|d| Sample::of(&d))
+        .collect();
+    let model = ProcessModel::learn(&samples);
+    let enob =
+        |err_sq: f64, outputs: f64| (2.0 / ((err_sq / outputs).sqrt() * 12f64.sqrt())).log2();
+
+    println!("Verification: GPU kernel (f32) against its CPU twin (f64), same inputs and RNG");
+    println!(
+        "{:>7} {:>6} {:>11} {:>11} {:>12} {:>16}",
+        "core", "noise", "ENOB gpu", "ENOB twin", "Δ ENOB", "last outputs Δ"
+    );
+    for (size, radius, gap) in [(16, 5.0, 80.0), (32, 3.0, 70.0), (64, 3.0, 70.0)] {
+        let ring = model.predict(radius, gap).unwrap();
+        let mut core = Core::new(CoreConfig::new(ring, size, size));
+        core.program(Pattern::Random);
+        core.step(150_000_000_000, 0);
+        for noise in [false, true] {
+            let b = Batch::from_core(&core, 123_456_789, 8192, noise);
+            let g = gpu.run(b.clone());
+            let t = cpu_twin(&b);
+            let lsb = 2.0 / (b.levels - 1.0) / b.half;
+            let dy = g
+                .y_last
+                .iter()
+                .zip(&t.y_last)
+                .map(|(a, c)| (a - c).abs())
+                .fold(0.0, f64::max)
+                / lsb;
+            let (eg, et) = (enob(g.err_sq, g.outputs()), enob(t.err_sq, t.outputs()));
+            println!(
+                "{:>4}×{:<2} {:>6} {:>11.4} {:>11.4} {:>12.5} {:>12.2} LSB",
+                size,
+                size,
+                if noise { "on" } else { "off" },
+                eg,
+                et,
+                eg - et,
+                dy
+            );
+        }
+    }
+
+    println!("\nCross-check: GPU (every symbol) against the CPU core path (its own RNG stream)");
+    let ring = model.predict(5.0, 80.0).unwrap();
+    let mut core = Core::new(CoreConfig::new(ring, 16, 16));
+    core.program(Pattern::Random);
+    core.step(150_000_000_000, 0);
+    core.reset_ledger();
+    core.step(10_000_000_000, usize::MAX); // 100 000 symbols on the CPU path
+    let g = gpu.run(Batch::from_core(&core, 0, 100_000, true));
+    println!(
+        "  16×16, 100 000 symbols: CPU core ENOB {:.3}, GPU ENOB {:.3}",
+        core.ledger.enob(),
+        enob(g.err_sq, g.outputs())
+    );
+
+    println!(
+        "\nThroughput: {} symbols per dispatch, noise on",
+        MAX_SYMBOLS
+    );
+    println!(
+        "{:>7} {:>10} {:>14} {:>16} {:>14} {:>12}",
+        "core", "wall", "symbols/s", "simulated MAC/s", "hw time", "slowdown"
+    );
+    for (size, radius, gap) in [(16, 5.0, 80.0), (32, 3.0, 70.0), (64, 3.0, 70.0)] {
+        let ring = model.predict(radius, gap).unwrap();
+        let mut core = Core::new(CoreConfig::new(ring, size, size));
+        core.program(Pattern::Random);
+        core.step(150_000_000_000, 0);
+        let b = Batch::from_core(&core, 0, MAX_SYMBOLS, true);
+        let _ = gpu.run(b.clone()); // warm-up: pipeline compile, first allocation
+        let t0 = std::time::Instant::now();
+        let reps = 3;
+        for _ in 0..reps {
+            let _ = gpu.run(b.clone());
+        }
+        let wall = t0.elapsed().as_secs_f64() / reps as f64;
+        let syms = MAX_SYMBOLS as f64;
+        let hw = syms / core.cfg.baud;
+        println!(
+            "{:>4}×{:<2} {:>8.1} ms {:>14} {:>16} {:>11.0} µs {:>11.0}×",
+            size,
+            size,
+            wall * 1e3,
+            si(syms / wall),
+            si(syms * (size * size) as f64 / wall),
+            hw * 1e6,
+            wall / hw
+        );
+    }
+}
+
+fn si(v: f64) -> String {
+    let (d, u) = [(1e12, "T"), (1e9, "G"), (1e6, "M"), (1e3, "k")]
+        .into_iter()
+        .find(|(d, _)| v >= *d)
+        .unwrap_or((1.0, ""));
+    format!("{:.2} {u}", v / d)
 }

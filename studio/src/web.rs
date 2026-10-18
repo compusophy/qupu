@@ -11,6 +11,7 @@
 
 use crate::core::{Core, CoreConfig, Pattern, FS_PER_S};
 use crate::fit::{fit_device, DeviceFit};
+use crate::gpu;
 use crate::measure::Measurement;
 use crate::process::{ProcessModel, Sample};
 use crate::ring::{add_drop, Ring};
@@ -381,6 +382,16 @@ struct App {
     batch: Batch,
     view: View,
     dpr: f64,
+    /// WebGPU engine computing every symbol, once the adapter is ready.
+    gpu: Option<gpu::Gpu>,
+    gpu_status: String,
+    gpu_next: u64,
+    gpu_err: f64,
+    gpu_outputs: f64,
+    gpu_symbols: u64,
+    gpu_skipped: u64,
+    gpu_epoch: u64,
+    gpu_inflight_epoch: u64,
 }
 
 fn ring_for(model: &ProcessModel, size: usize) -> (Ring, &'static str) {
@@ -477,6 +488,15 @@ impl App {
             row_canvas,
             row,
             batch: Batch::default(),
+            gpu: None,
+            gpu_status: "starting".into(),
+            gpu_next: 0,
+            gpu_err: 0.0,
+            gpu_outputs: 0.0,
+            gpu_symbols: 0,
+            gpu_skipped: 0,
+            gpu_epoch: 0,
+            gpu_inflight_epoch: 0,
             view: View::default(),
             dpr: 1.0,
         };
@@ -545,6 +565,7 @@ impl App {
         self.core.program(Pattern::ALL[self.pattern_idx]);
         self.next_reload_fs = self.core.t_fs + RELOAD_FS;
         self.settled_phase = false;
+        self.reset_gpu_stats();
         for i in 0..Pattern::ALL.len() {
             if let Some(b) = self.ui.doc.get_element_by_id(&format!("pat-{i}")) {
                 b.set_attribute(
@@ -568,7 +589,40 @@ impl App {
         core.calibrate = cal;
         core.t_fs = t;
         self.core = core;
+        self.gpu_next = 0;
         self.set_pattern(self.pattern_idx);
+    }
+
+    fn reset_gpu_stats(&mut self) {
+        self.gpu_err = 0.0;
+        self.gpu_outputs = 0.0;
+        self.gpu_symbols = 0;
+        self.gpu_skipped = 0;
+        self.gpu_epoch += 1;
+    }
+
+    /// Collect a finished GPU batch (if any) and dispatch every symbol the
+    /// core has counted since the last dispatch. Results from before a
+    /// reload or resize are dropped by epoch.
+    fn pump_gpu(&mut self) {
+        let Some(g) = self.gpu.as_mut() else { return };
+        if let Some(st) = g.try_collect() {
+            if self.gpu_inflight_epoch == self.gpu_epoch {
+                self.gpu_err += st.err_sq;
+                self.gpu_outputs += st.outputs();
+                self.gpu_symbols += st.symbols;
+            }
+        }
+        let total = self.core.ledger.symbols;
+        if g.busy() || total <= self.gpu_next {
+            return;
+        }
+        let pending = total - self.gpu_next;
+        let n = pending.min(gpu::MAX_SYMBOLS as u64);
+        self.gpu_skipped += pending - n;
+        g.submit(gpu::Batch::from_core(&self.core, total - n, n as u32, true));
+        self.gpu_inflight_epoch = self.gpu_epoch;
+        self.gpu_next = total;
     }
 
     fn frame(&mut self, now_ms: f64, perf_now: &dyn Fn() -> f64) {
@@ -592,10 +646,12 @@ impl App {
                 self.settled_phase = true;
                 self.core.ledger.err_sq = 0.0;
                 self.core.ledger.err_n = 0.0;
+                self.reset_gpu_stats();
             }
             if self.settled_phase {
                 self.settled_fs += fs as u64;
             }
+            self.pump_gpu();
             self.cost_ms = 0.9 * self.cost_ms + 0.1 * (perf_now() - t0);
         }
         self.resize();
@@ -1140,14 +1196,35 @@ impl App {
         ui.text("wall", &format!("{:.1} s", self.wall_s));
         ui.text("cost", &format!("{:.1} ms/frame", self.cost_ms));
         let settled = core.settled();
-        ui.text(
-            "enob",
-            &if self.settled_phase && core.ledger.err_n > 0.0 {
-                format!("{:.1} bits", core.ledger.enob())
-            } else {
-                "–".into()
-            },
-        );
+        // ENOB over every symbol when the GPU is computing them, otherwise
+        // over the CPU's per-frame sample.
+        let enob = if !self.settled_phase {
+            None
+        } else if self.gpu_outputs > 0.0 {
+            Some((2.0 / ((self.gpu_err / self.gpu_outputs).sqrt() * 12f64.sqrt())).log2())
+        } else if core.ledger.err_n > 0.0 {
+            Some(core.ledger.enob())
+        } else {
+            None
+        };
+        ui.text("enob", &enob.map_or("–".into(), |e| format!("{e:.1} bits")));
+        let compute = match &self.gpu {
+            Some(_) => {
+                let done = self.gpu_symbols as f64;
+                let cover = if done + (self.gpu_skipped as f64) > 0.0 {
+                    done / (done + self.gpu_skipped as f64)
+                } else {
+                    1.0
+                };
+                format!("GPU · {:.0} % of symbols", 100.0 * cover)
+            }
+            None => format!("CPU · {MAX_FULL_SYMBOLS} symbols/frame"),
+        };
+        ui.text("compute", &compute);
+        if let Some(e) = ui.doc.get_element_by_id("compute") {
+            e.set_attribute("title", &format!("GPU: {}", self.gpu_status))
+                .ok();
+        }
         ui.text("werr", &format!("{:.2} %", 100.0 * core.weight_error()));
         ui.text("settled", &format!("{:.0} %", 100.0 * settled));
         let peak = (core.cfg.rows * core.cfg.channels) as f64 * core.cfg.baud;
@@ -1266,6 +1343,21 @@ pub fn start() -> Result<(), JsValue> {
         App::new(doc.clone(), now.clone()).map_err(|e| JsValue::from_str(&e))?,
     ));
     app.borrow_mut().set_pattern(4);
+    {
+        // WebGPU is optional: without it the CPU samples each frame.
+        let a = app.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            match gpu::Gpu::new().await {
+                Ok(g) => {
+                    let mut a = a.borrow_mut();
+                    a.gpu_status = g.adapter.clone();
+                    a.gpu_next = a.core.ledger.symbols;
+                    a.gpu = Some(g);
+                }
+                Err(e) => a.borrow_mut().gpu_status = format!("unavailable ({e})"),
+            }
+        });
+    }
 
     let on = |id: &str, ev: &str, f: Box<dyn FnMut(web_sys::Event)>| {
         let cb = Closure::wrap(f);

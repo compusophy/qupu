@@ -21,6 +21,26 @@ pub const FS_PER_S: f64 = 1e15;
 /// Largest ring detuning used for weighting, as a fraction of channel spacing.
 pub const DETUNE_MAX: f64 = 0.38;
 
+/// Amplitude of the per-symbol random term in the synthetic workload.
+pub const INPUT_NOISE: f64 = 0.06;
+
+/// The synthetic workload, shared by the CPU core, the GPU kernel and its
+/// CPU twin. Channel j at symbol s carries
+///   0.5 + 0.30·sin(slow) + 0.12·sin(fast) + INPUT_NOISE·(2u − 1), clamped to [0, 1]:
+/// a slow drift over tens of µs (readable at µs-per-second playback) and a
+/// faster swing. Returns [slow phase, slow rate, fast phase, fast rate] at
+/// symbol `s0`, rates per symbol, phases reduced mod 2π in f64 so the f32
+/// GPU path only ever adds small offsets.
+pub fn input_phases(baud: f64, j: usize, s0: u64) -> [f64; 4] {
+    let tau = 2.0 * std::f64::consts::PI;
+    let jf = j as f64;
+    let slow_rate = tau / (baud * (25e-6 + 6e-6 * jf));
+    let fast_rate = 0.00021 * (1.0 + 0.37 * jf);
+    let slow = (s0 as f64 * slow_rate + 1.7 * jf).rem_euclid(tau);
+    let fast = (s0 as f64 * fast_rate + 0.9 * jf).rem_euclid(tau);
+    [slow, slow_rate, fast, fast_rate]
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct CoreConfig {
     pub channels: usize,
@@ -567,6 +587,15 @@ impl Core {
         (s / n).sqrt()
     }
 
+    /// Receiver noise (TIA thermal + shot at full-scale photocurrent, over
+    /// baud/2) as a fraction of full scale.
+    pub fn receiver_sigma(&self) -> f64 {
+        let cfg = &self.cfg;
+        let i_fs = cfg.p_det_w; // responsivity 1 A/W
+        let b = cfg.baud / 2.0;
+        (cfg.tia_a_per_rthz.powi(2) * b + 2.0 * 1.602e-19 * i_fs * b).sqrt() / i_fs
+    }
+
     pub fn heater_mw(&self) -> f64 {
         self.shift_nm.iter().sum::<f64>() / self.cfg.nm_per_mw
     }
@@ -591,18 +620,13 @@ impl Core {
         self.native_nm[k] + eff
     }
 
-    /// Input vector for symbol `s`: a synthetic workload. Each channel drifts
-    /// slowly (tens of µs, so it reads at µs-per-second playback) under a
-    /// faster swing and per-symbol noise.
+    /// Input vector for symbol `s` (see `input_phases`).
     fn input(&mut self, s: u64) -> Vec<f64> {
-        let n = self.cfg.channels;
-        let t = s as f64 / self.cfg.baud;
-        (0..n)
+        (0..self.cfg.channels)
             .map(|j| {
-                let jf = j as f64;
-                let slow = (2.0 * std::f64::consts::PI * t / (25e-6 + 6e-6 * jf) + 1.7 * jf).sin();
-                let fast = (s as f64 * 0.00021 * (1.0 + 0.37 * jf) + 0.9 * jf).sin();
-                (0.5 + 0.30 * slow + 0.12 * fast + 0.06 * (2.0 * self.rng.uniform() - 1.0))
+                let p = input_phases(self.cfg.baud, j, s);
+                let u = self.rng.uniform();
+                (0.5 + 0.30 * p[0].sin() + 0.12 * p[2].sin() + INPUT_NOISE * (2.0 * u - 1.0))
                     .clamp(0.0, 1.0)
             })
             .collect()
@@ -653,11 +677,7 @@ impl Core {
         // Compute the most recent symbols in full.
         let full = (n_sym as usize).min(max_symbols);
         let first = self.ledger.symbols - full as u64;
-        let i_fs = cfg.p_det_w; // responsivity 1 A/W
-        let sigma = ((cfg.tia_a_per_rthz.powi(2) * cfg.baud / 2.0)
-            + 2.0 * 1.602e-19 * i_fs * cfg.baud / 2.0)
-            .sqrt()
-            / i_fs;
+        let sigma = self.receiver_sigma();
         let levels = (1u64 << cfg.adc_bits) as f64;
         let (mid, half) = self.weight_scale();
         let mut x_sum = vec![0.0; n];

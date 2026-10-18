@@ -12,9 +12,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 miniz_oxide = "0.8"
+wgpu = "30.0.1"
+bytemuck = { version = "1.25", features = ["derive"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "=0.2.104"
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
@@ -34,4 +40,3 @@ path = "src/main.rs"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
