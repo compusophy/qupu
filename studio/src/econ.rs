@@ -427,7 +427,7 @@ pub fn engines() -> Vec<Engine> {
 
 /// Full-scale detector power for ≈6 bits: 200 µW at 10 GBd (PLAN.md §4.4),
 /// scaled by √(rate) because receiver noise integrates over bandwidth.
-fn receiver_power(baud: f64) -> f64 {
+pub fn receiver_power(baud: f64) -> f64 {
     200e-6 * (baud / 10e9).sqrt()
 }
 

@@ -11,16 +11,22 @@
 //!   * `core`    — broadcast-and-weight core on a femtosecond clock
 //!   * `gpu`     — every symbol of the core on the GPU (wgpu), with a CPU twin
 //!   * `econ`    — first-principles cost, energy and embodied energy vs GPUs
+//!   * `geometry`  — lattices by symmetry group, Hilbert ordering, H-tree skew
+//!   * `freespace` — the glass engine: optics, crosstalk, calibration, score
+//!   * `search`    — hill climbing over geometry and architecture
 //!   * `web`     — the browser view (wasm32 only)
 
 pub mod core;
 pub mod econ;
 pub mod fit;
+pub mod freespace;
+pub mod geometry;
 pub mod gpu;
 pub mod matfile;
 pub mod measure;
 pub mod process;
 pub mod ring;
+pub mod search;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

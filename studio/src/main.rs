@@ -4,6 +4,8 @@
 //!                                  leave-one-out check, print predictions
 //!   cargo run --release -- core    benchmark the core simulator (CPU)
 //!   cargo run --release -- econ    first-principles cost and energy vs GPUs
+//!   cargo run --release -- search  hill-climb glass-engine geometry and
+//!                                  architecture [budget=1600] [bits floor=6]
 //!   cargo run --release -- gpu     verify the GPU kernel against its CPU
 //!                                  twin, then benchmark every-symbol speed
 
@@ -20,6 +22,16 @@ fn main() {
         Some("core") => bench_core(),
         Some("gpu") => bench_gpu(),
         Some("econ") => econ(),
+        Some("search") => search(
+            std::env::args()
+                .nth(2)
+                .and_then(|b| b.parse().ok())
+                .unwrap_or(1600),
+            std::env::args()
+                .nth(3)
+                .and_then(|f| f.parse().ok())
+                .unwrap_or(studio::search::DEFAULT_FLOOR),
+        ),
         Some("resonances") => resonances(),
         _ => report(),
     }
@@ -387,5 +399,182 @@ fn econ() {
                 name, lo.0, hi.0, lo.1, hi.1
             );
         }
+    }
+}
+
+thread_local! {
+    static LAYOUTS: std::cell::RefCell<studio::freespace::Layouts> = std::cell::RefCell::new(Default::default());
+}
+
+/// Score designs on all cores; common random numbers (one seed) so that
+/// differences between designs are not noise.
+fn eval_parallel(designs: &[studio::freespace::Design]) -> Vec<studio::freespace::Score> {
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let chunk = designs.len().div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = designs
+            .chunks(chunk)
+            .map(|c| {
+                s.spawn(move || {
+                    c.iter()
+                        .map(|d| {
+                            LAYOUTS.with(|l| studio::freespace::score(d, &mut l.borrow_mut(), 7))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    })
+}
+
+fn search(budget: usize, floor: f64) {
+    use studio::freespace::{enob_terms, Design, Score, Terms};
+    use studio::geometry::Lattice;
+    use studio::search::{archive, climb, describe, neighbours};
+    let b200: (f64, f64) = (0.703, 4.5); // FP4 dense: TMAC/s per $ of COGS, TMAC/s per W
+    let line = |label: &str, s: &Score| {
+        println!("  {:<34} ENOB {:>4.2} · {:>7.2} TMAC/s/$ · {:>6.1} fJ/MAC · {:>8.1} TMAC/s · ${:>5.0} · {:>5.1} W · field {:>5.1} mm · fitness {:>5.2}",
+            label, s.enob, s.tmac_per_usd(), s.fj_per_mac(), s.macs_per_s / 1e12, s.cost_usd, s.power_w, s.field_mm, s.fitness(floor));
+    };
+    println!("Glass-engine search. Fitness = log10(TMAC/s per $) + log10(TMAC/s per W), −3 per bit below {floor} bits.");
+    println!(
+        "Reference: B200 FP4 = {:.2} TMAC/s per $ · {:.0} fJ/MAC · fitness {:.2}\n",
+        b200.0,
+        1e3 / b200.1,
+        b200.0.log10() + b200.1.log10()
+    );
+    let fast = eval_parallel(&[Design::fast()])[0];
+    line("starting point (econ glass engine)", &fast);
+
+    let t0 = std::time::Instant::now();
+    let mut eval = |d: &[Design]| eval_parallel(d);
+    let run = climb(
+        budget,
+        8,
+        2026,
+        Some(Design::fast()),
+        &|_| {},
+        &mut eval,
+        floor,
+    );
+    println!(
+        "\nUnconstrained climb from the econ glass engine: {} designs in {:.0} s",
+        run.evals,
+        t0.elapsed().as_secs_f64()
+    );
+    for (e, f) in &run.history {
+        println!("    after {:>5} designs  fitness {:.3}", e, f);
+    }
+    line("climb best", &run.best.score);
+
+    // Each symmetry group gets its own climb, started from the winner with
+    // its pixel lattice swapped, so geometry is compared at its own optimum
+    // rather than at another lattice's.
+    println!(
+        "\nBest design per pixel-lattice symmetry group ({} designs each):",
+        budget / 2
+    );
+    let mut best = run.best.clone();
+    let mut pareto = run.pareto.clone();
+    for l in Lattice::ALL {
+        let mut eval = |d: &[Design]| eval_parallel(d);
+        let start = Design {
+            in_lattice: l,
+            ..run.best.design.clone()
+        };
+        let r = climb(
+            budget / 2,
+            8,
+            99 + l as u64,
+            Some(start),
+            &move |d: &mut Design| d.in_lattice = l,
+            &mut eval,
+            floor,
+        );
+        line(l.name(), &r.best.score);
+        println!("      {}", describe(&r.best.design));
+        for c in &r.pareto {
+            archive(&mut pareto, c, floor);
+        }
+        if r.best.fitness() > best.fitness() {
+            best = r.best;
+        }
+    }
+
+    println!(
+        "\nOverall best ({:.0} s of search):",
+        t0.elapsed().as_secs_f64()
+    );
+    println!("  {}", describe(&best.design));
+    line("best", &best.score);
+    println!(
+        "  vs B200 FP4: {:.1}× per $, {:.1}× per joule",
+        best.score.tmac_per_usd() / b200.0,
+        best.score.tmac_per_w() / b200.1
+    );
+    // The search sees one noisy ENOB estimate per design and keeps the
+    // lucky ones; re-measure on fresh noise, vectors and fabrication draws.
+    let mut l = studio::freespace::Layouts::default();
+    let held: Vec<f64> = (0..4)
+        .map(|k| enob_terms(&best.design, &mut l, 16, 96, 1000 + k, Terms::ALL).0)
+        .collect();
+    println!(
+        "  held-out ENOB (4 fresh seeds): {}",
+        held.iter()
+            .map(|e| format!("{e:.2}"))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+
+    println!("\nError budget of the best design (ENOB with one source switched off):");
+    let (all, _) = enob_terms(&best.design, &mut l, 16, 96, 7, Terms::ALL);
+    println!("  {:<34} {:.2} bits", "everything on", all);
+    for (name, t) in Terms::without_each() {
+        let (e, _) = enob_terms(&best.design, &mut l, 16, 96, 7, t);
+        println!("  without {:<26} {:.2} bits ({:+.2})", name, e, e - all);
+    }
+
+    println!("\nPareto front (≥ {floor} bits; precision ↔ cheapest compute ↔ most energy-efficient), all runs:");
+    pareto.sort_by(|a, b| b.score.tmac_per_usd().total_cmp(&a.score.tmac_per_usd()));
+    let step = (pareto.len() / 10).max(1);
+    for c in pareto.iter().step_by(step) {
+        line(
+            &format!(
+                "{}×{} {}/{} {}",
+                c.design.n_in,
+                c.design.m_out,
+                c.design.in_lattice.short(),
+                c.design.tile_lattice.short(),
+                studio::search::fmt_rate(c.design.baud)
+            ),
+            &c.score,
+        );
+    }
+    println!(
+        "  ({} non-dominated designs; every {}th shown)",
+        pareto.len(),
+        step
+    );
+
+    println!("\nAblation: change one gene of the best design");
+    let base = best.fitness();
+    let alts = neighbours(&best.design);
+    let designs: Vec<Design> = alts.iter().map(|a| a.1.clone()).collect();
+    let scores = eval_parallel(&designs);
+    let mut rows: Vec<(String, Score)> = alts.into_iter().map(|a| a.0).zip(scores).collect();
+    rows.sort_by(|a, b| a.1.fitness(floor).total_cmp(&b.1.fitness(floor)));
+    for (label, s) in rows {
+        println!(
+            "  {:<38} Δfitness {:>+6.2} · ENOB {:>4.2} · {:>7.2} TMAC/s/$ · {:>6.1} fJ/MAC",
+            label,
+            s.fitness(floor) - base,
+            s.enob,
+            s.tmac_per_usd(),
+            s.fj_per_mac()
+        );
     }
 }
