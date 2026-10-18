@@ -130,11 +130,13 @@ Hex is the densest packing at a given minimum spacing. The aperiodic sets
 need more field for the same spacing: the R2 set needs 2.7× the field of
 hex.
 
-**Where aperiodic order can win.** The tabletop predictions show a regime
-where the aperiodic sunflower overtakes hexagonal: small NA, ghost-limited,
-frame-averaged. There, discrete ghosts landing on specific neighbours cost
-more than a diffuse halo. Square, with its larger zero order, stays ahead
-of both. See TABLETOP.md, prediction 3.
+**Where aperiodic order can win.** On the tabletop rig, the sunflower and
+R2 layouts beat square by about 0.15 bit when diffraction ghosts limit
+precision (small NA, frame-averaged). There, discrete ghosts landing on
+specific neighbours cost more than a diffuse halo. When aberration limits
+instead, the lattices tie except R2, whose larger field costs 0.7 bit. See
+TABLETOP.md, prediction 3. The effect is small next to packing density and
+encoding.
 
 **Encoding matters more than geometry.** On the tabletop rig, differential
 tiles with the exposure set per workload are worth 1–6 bits over an offset

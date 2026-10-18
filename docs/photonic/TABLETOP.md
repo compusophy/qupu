@@ -191,33 +191,32 @@ floor.
 cell (94.5 µm) and place the cells on a lattice. Sites are rounded to the
 47 µm pixel grid in practice.
 
-| Lattice (symmetry group) | Ghost-limited: one lens at f/8, 64 frames averaged | Aberration-limited: one lens at f/4 |
-|---|---|---|
-| Square (p4m) | **8.22 ± 0.07** | 6.32 ± 0.06 |
-| Hexagonal (p6m) | 7.76 ± 0.25 | **6.41 ± 0.07** |
-| Fibonacci sunflower | 7.97 ± 0.06 | 5.91 ± 0.13 |
-| Golden quasi-lattice (R2) | 6.31 ± 0.11 | 5.34 ± 0.34 |
+The test uses 64 outputs on hex tiles, so that every layout fits the
+lenses' 43 mm image circle.
 
-The prediction: square leads or ties in both regimes, while hexagonal and
-the sunflower swap places.
+| Lattice (symmetry group) | Ghost-limited: one lens at f/8, 64 frames averaged | Aberration-limited: one lens at f/2.8 | Field |
+|---|---|---|---|
+| Square (p4m) | 8.25 ± 0.02 | **7.02 ± 0.04** | 29.7 mm |
+| Hexagonal (p6m) | 8.33 ± 0.04 | 7.00 ± 0.03 | 24.4 mm |
+| Fibonacci sunflower | **8.40 ± 0.03** | 6.99 ± 0.07 | 29.0 mm |
+| Golden quasi-lattice (R2) | **8.40 ± 0.04** | 6.28 ± 0.19 | 44.9 mm |
 
-**Mechanism, ghost-limited.** Periodic lattices diffract into discrete
-orders, sharp ghosts that land on specific neighbouring tiles. Calibration
-leaves a 5 % residual on each ghost. An aperiodic sunflower spreads the same
-light into a diffuse halo, whose errors average out, so it beats
-hexagonal.
+The prediction is small but sharp, and a rig averaging enough frames to
+resolve 0.1 bit can test both halves.
 
-Hexagonal suffers most among the periodic lattices. Its round equal-area
-cells pass only half the light into the zero order, and it has six orders
-to square's four. Square's 64 % zero order keeps it ahead of both.
+- **Ghost-limited:** the aperiodic layouts beat square by about 0.15 bit.
+  Periodic lattices diffract into discrete orders, sharp ghosts that land
+  on specific neighbouring tiles. Calibration leaves a 5 % residual on each
+  ghost. Aperiodic layouts spread the same light into a diffuse halo, whose
+  errors average out.
+- **Aberration-limited:** the lattices tie, except the R2 set. Its closest
+  pairs sit nearer than its average spacing, so the same minimum spacing
+  needs a 50 % larger field. That costs 0.7 bit.
 
-**Mechanism, aberration-limited.** Blur grows with field², so the densest
-packing at a given minimum spacing wins. Hexagonal is the densest circle
-packing. The sunflower and especially the R2 set need more field for the
-same spacing.
-
-The search of the fast design ([GLASS_ENGINE.md](GLASS_ENGINE.md)) sits in
-the second regime, which is why it picks hex.
+An earlier version of this prediction used 256 outputs. Its 2×2-cell
+layouts span 57–112 mm and would not fit these lenses. The rig's design
+climb (`tabletop::rig_enob`) now penalises any layout larger than the
+image circle.
 
 ## Option: a fully optical sum on a line sensor
 

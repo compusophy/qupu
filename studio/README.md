@@ -135,6 +135,26 @@ against H100, B200, MI300X and Gaudi 3. Findings are in
 
 ## Glass engine: free-space simulator and search
 
+![Glass Engine demo: the tabletop rig simulated, with the input LCD, a symmetric two-lens relay, the weight LCD and the camera](web/glass.png)
+
+`web/glass.html` is the tabletop rig from
+[TABLETOP.md](../docs/photonic/TABLETOP.md), raymarched in WebGL2 and run by
+the simulator in real time at 50 symbols/s. Every symbol goes through
+`freespace::Engine`: the input LCD shows the image's copies, the weight LCD
+shows the masks the engine solved, the beams carry those images blurred by
+their cones, and the inset shows what the camera reads next to the exact
+result.
+
+**Evolve** starts from a naive bench (one fast lens, a quasi-lattice
+layout too big for the lens) and hill-climbs lattice, cell size, f-stop and
+relay with `tabletop::RigClimb`. The bench rearranges itself as the climb
+improves; it converges in about 90 designs.
+
+Open it with `./build.sh`, then `WEB_ROOT=studio/web node server.mjs` from
+the repo root and http://localhost:8080/glass.html. URL options for stills:
+`?still=1`, `view=0|1|2`, `workload=0..3`, `input=0..3`, `t=<s>`,
+`rig=naive`, `evolve=<steps>`.
+
 `src/freespace.rs` models a lens-and-mask matrix engine from the optics up:
 - blur and aberration
 - crosstalk

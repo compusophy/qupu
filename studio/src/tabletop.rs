@@ -7,7 +7,7 @@
 //! the CLI does.
 
 use crate::core::Rng;
-use crate::freespace::{enob_terms, Design, Engine, Layouts, Terms};
+use crate::freespace::{enob_terms, Design, Engine, Layouts, Physics, Terms};
 use crate::geometry::Lattice;
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -17,6 +17,8 @@ pub const SIDE: usize = 16;
 pub const N: usize = SIDE * SIDE;
 /// Pixel pitch of the 5.5″ 2K mono LCDs, µm.
 pub const LCD_PITCH_UM: f64 = 47.25;
+/// Image circle of a full-frame 50 mm lens: the relay's usable field.
+pub const IMAGE_CIRCLE_MM: f64 = 43.0;
 /// Relay f-numbers on the lens aperture rings.
 pub const F_STOPS: [f64; 7] = [1.8, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0];
 
@@ -347,9 +349,19 @@ impl Rig {
     }
 }
 
+/// Diameter of the circle the layout's tiles fill, mm.
+pub fn field_mm(d: &Design, layouts: &mut Layouts) -> f64 {
+    2.0 * Physics::new(d, layouts, 1).field_radius / 1000.0
+}
+
 /// Predicted effective bits of a rig (sampled, fixed seed: deterministic).
+/// Layouts larger than the lens's image circle vignette at the edge; they
+/// lose 4 bits per 100 % oversize, a soft wall the climb can climb back
+/// over rather than a cliff it cannot see past.
 pub fn rig_enob(r: &Rig, layouts: &mut Layouts) -> f64 {
-    enob_terms(&r.design(), layouts, 8, 32, 11, Terms::ALL).0
+    let d = r.design();
+    let over = (field_mm(&d, layouts) / IMAGE_CIRCLE_MM - 1.0).max(0.0);
+    enob_terms(&d, layouts, 8, 32, 11, Terms::ALL).0 - 4.0 * over
 }
 
 /// A hill climb over the bench, one evaluation per `step`, so a frame loop

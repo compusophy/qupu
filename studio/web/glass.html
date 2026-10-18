@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Glass Engine</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Michroma&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* A photograph of a bench with a few instruments laid over it. The scene
+   fills the window; the readouts and the camera's view float on glass. One
+   visual world (a dark lab, green light), so the page is single-theme. */
+:root {
+  --bg: #030406;
+  --glass: rgba(6, 9, 14, 0.62);
+  --line: rgba(160, 190, 220, 0.14);
+  --fg: #dfe6ee;
+  --muted: #8592a4;
+  --green: #6dff8f;
+  --accent: #b9c6ff;
+  --display: "Michroma", "Eurostile", "Arial Black", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--body); box-sizing: border-box; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#gl:active { cursor: grabbing; }
+.overlay { position: fixed; pointer-events: none; }
+.overlay > * { pointer-events: auto; }
+.panel { background: var(--glass); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+
+.title { top: max(14px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); max-width: min(520px, calc(100vw - 32px)); }
+.title h1 { margin: 0; font: 17px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; }
+.title p { margin: 8px 0 0; font: 12px/1.5 var(--body); color: var(--muted); text-wrap: pretty; }
+.title a { color: var(--accent); }
+
+.readouts { top: max(14px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); padding: 12px 14px; display: grid; grid-template-columns: repeat(3, auto); gap: 10px 18px; }
+.ro span { display: block; font: 10px/1.2 var(--mono); color: var(--muted); letter-spacing: 0.05em; }
+.ro b { font: 500 17px/1.15 var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ro b.big { font-size: 24px; color: var(--green); }
+.chip { grid-column: 1 / -1; font: 11px/1.3 var(--mono); color: var(--muted); }
+
+.dock { left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.io { padding: 10px 12px 12px; }
+.io .labels { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 calc(100% / 25); font: 10px/1.2 var(--mono); color: var(--muted); letter-spacing: 0.05em; margin-bottom: 6px; }
+.io canvas { display: block; width: min(360px, calc(100vw - 56px)); aspect-ratio: 52 / 16; image-rendering: pixelated; }
+.io .q { margin-top: 6px; font: 11px/1.3 var(--mono); color: var(--muted); }
+.io .q b { color: var(--fg); font-weight: 500; }
+
+.controls { align-self: stretch; padding: 8px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.lbl { font: 10px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+button, select { font: 12px/1 var(--body); color: var(--fg); background: rgba(20, 28, 44, 0.8); border: 1px solid var(--line); border-radius: 5px; padding: 6px 9px; cursor: pointer; }
+button:hover, select:hover { border-color: rgba(185, 198, 255, 0.4); }
+button[aria-pressed="true"] { border-color: var(--green); color: #fff; background: rgba(40, 90, 55, 0.55); }
+button#evolve { font-weight: 500; }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#boot { position: fixed; inset: 0; display: grid; place-content: center; gap: 10px; text-align: center; font: 12px/1.5 var(--mono); color: var(--muted); letter-spacing: 0.06em; }
+#boot strong { font: 14px/1 var(--display); color: var(--fg); letter-spacing: 0.24em; text-transform: uppercase; }
+
+@media (max-width: 760px) {
+  .title p { display: none; }
+  .readouts { top: calc(max(14px, env(safe-area-inset-top)) + 30px); left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right)); padding: 8px 10px; gap: 6px 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ro.x { display: none; }
+  .ro b { font-size: 14px; }
+  .ro b.big { font-size: 18px; }
+  .io { padding: 8px 10px 10px; }
+  .io canvas { width: min(300px, calc(100vw - 52px)); }
+  .controls { gap: 6px 10px; padding: 6px 8px; }
+  button, select { font-size: 11.5px; padding: 5px 7px; }
+  .lbl { display: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="A simulated optical bench: a backlit LCD, two camera lenses face to face, a second LCD and a camera on an aluminium rail, with green light passing through"></canvas>
+<div id="boot"><strong>Glass Engine</strong><span id="boot-msg">loading the simulator…</span></div>
+
+<header class="overlay title">
+  <h1>Glass Engine</h1>
+  <p>The tabletop rig from <a href="https://github.com/compusophy/qupu/blob/ccr-65559fd1-hdl9p5/docs/photonic/TABLETOP.md">TABLETOP.md</a>, simulated. One LCD shows the input; two 50 mm lenses image it onto a second LCD holding the weights; a camera reads each tile's light as a dot product. Every frame is the model's physics, not hardware: blur, crosstalk, diffraction, calibration error, camera noise. Drag to orbit, scroll to zoom.</p>
+</header>
+
+<section class="overlay readouts panel" aria-live="off">
+  <div class="ro"><span>bits on this job</span><b class="big" id="bits">–</b></div>
+  <div class="ro"><span>full-scale ENOB</span><b id="pred">–</b></div>
+  <div class="ro x"><span>exposure</span><b id="exposure">–</b></div>
+  <div class="ro"><span>relay</span><b id="fstop-val">–</b></div>
+  <div class="ro x"><span>weight lattice</span><b id="lattice-val">–</b></div>
+  <div class="ro x"><span>multiplies</span><b id="macs">–</b></div>
+  <div class="ro x"><span>field / image circle</span><b id="field">–</b></div>
+  <div class="ro x"><span>outputs</span><b id="outs">–</b></div>
+  <div class="ro x"><span>symbols</span><b id="symc">–</b></div>
+  <div class="chip"><span id="state">as costed in TABLETOP.md</span> · <span id="evolve-val">50 symbols/s, real time</span></div>
+</section>
+
+<div class="overlay dock">
+<section class="io panel">
+  <div class="labels"><span>input</span><span>camera</span><span>exact</span></div>
+  <canvas id="io" aria-label="Input image, the rig's measured output, and the exact result"></canvas>
+  <div class="q">output: <b id="quality">–</b> · symbol <span id="sym">0</span></div>
+</section>
+
+<nav class="controls panel">
+  <div class="group" role="group" aria-label="Workload">
+    <span class="lbl">job</span>
+    <button id="wl-0" type="button">Blur</button>
+    <button id="wl-1" type="button">Low-pass</button>
+    <button id="wl-2" type="button">Edges</button>
+    <button id="wl-3" type="button">Spectrum</button>
+  </div>
+  <div class="group" role="group" aria-label="Input">
+    <span class="lbl">input</span>
+    <button id="in-0" type="button">Text</button>
+    <button id="in-1" type="button">Orbits</button>
+    <button id="in-2" type="button">Wheel</button>
+    <button id="in-3" type="button">Face</button>
+  </div>
+  <div class="group">
+    <span class="lbl">bench</span>
+    <button id="relay" type="button" aria-pressed="true">Two lenses</button>
+    <select id="fstop" aria-label="Relay f-number">
+      <option value="0">f/1.8</option><option value="1">f/2.8</option><option value="2">f/4</option>
+      <option value="3">f/5.6</option><option value="4">f/8</option><option value="5">f/11</option><option value="6">f/16</option>
+    </select>
+    <select id="lattice" aria-label="Weight lattice">
+      <option value="0">square (p4m)</option><option value="1">hexagonal (p6m)</option>
+      <option value="2">Fibonacci sunflower</option><option value="3">golden quasi-lattice</option>
+    </select>
+    <button id="asbuilt" type="button">As built</button>
+    <button id="evolve" type="button" aria-pressed="false">Evolve</button>
+  </div>
+  <div class="group" role="group" aria-label="View">
+    <span class="lbl">view</span>
+    <button id="view-0" type="button">Bench</button>
+    <button id="view-1" type="button">Relay</button>
+    <button id="view-2" type="button">Mask</button>
+  </div>
+</nav>
+</div>
+
+<script type="module">
+  const msg = document.getElementById('boot-msg');
+  try {
+    const { default: init, start_glass } = await import('./pkg/studio.js');
+    await init();
+    msg.textContent = 'solving 512 weight masks…';
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 30)));
+    start_glass();
+    document.getElementById('boot').remove();
+  } catch (e) {
+    msg.textContent = 'The simulator could not start: ' + (e && e.message ? e.message : e) + '. It needs WebAssembly and WebGL2.';
+  }
+</script>
+</body>
+</html>

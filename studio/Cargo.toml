@@ -29,7 +29,8 @@ web-sys = { version = "0.3", features = [
   "Event", "EventTarget", "MouseEvent", "Performance",
   "CanvasRenderingContext2d",
   "WebGl2RenderingContext", "WebGlProgram", "WebGlShader", "WebGlBuffer",
-  "WebGlVertexArrayObject", "WebGlUniformLocation",
+  "WebGlVertexArrayObject", "WebGlUniformLocation", "WebGlTexture", "WebGlFramebuffer",
+  "PointerEvent", "WheelEvent", "Location", "MediaQueryList",
 ] }
 
 [[bin]]

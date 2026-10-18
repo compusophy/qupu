@@ -16,6 +16,7 @@
 //!   * `search`    — hill climbing over geometry and architecture
 //!   * `tabletop`  — the tabletop rig: workloads, inputs, bench genome, LCD map
 //!   * `web`     — the browser view (wasm32 only)
+//!   * `glass_view` — the glass-engine demo: the tabletop rig, raymarched (wasm32 only)
 
 pub mod core;
 pub mod econ;
@@ -30,5 +31,7 @@ pub mod ring;
 pub mod search;
 pub mod tabletop;
 
+#[cfg(target_arch = "wasm32")]
+mod glass_view;
 #[cfg(target_arch = "wasm32")]
 mod web;

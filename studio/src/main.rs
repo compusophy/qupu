@@ -587,7 +587,7 @@ fn search(budget: usize, floor: f64) {
 fn tabletop() {
     use studio::freespace::{enob_terms, Design, Engine, Layouts, Physics, Signed, Terms};
     use studio::geometry::Lattice;
-    use studio::tabletop::{workload_bits, Workload};
+    use studio::tabletop::{field_mm, workload_bits, Workload, IMAGE_CIRCLE_MM};
     fn enob_t(d: &Design, l: &mut Layouts, t: Terms) -> (f64, f64) {
         let e: Vec<f64> = (0..4)
             .map(|k| enob_terms(d, l, 12, 64, 50 + k, t).0)
@@ -692,8 +692,19 @@ fn tabletop() {
     }
 
     println!("\nPrediction 3: geometry is software on this rig. Weight cells of 2×2 LCD pixels (94.5 µm)");
-    println!("placed on each lattice (sites rounded to the 47 µm pixel grid in practice):");
+    println!("placed on each lattice (sites rounded to the 47 µm pixel grid in practice), 64 outputs on hex");
+    println!("tiles so every layout fits the lenses' {IMAGE_CIRCLE_MM:.0} mm image circle:");
     let averaged = rig.noise_override / 8.0; // 64 frames averaged
+    let small = |lat: Lattice, na: f64, noise: f64| Design {
+        in_lattice: lat,
+        tile_lattice: Lattice::Hex,
+        m_out: 64,
+        pitch_um: 2.0 * rig.pitch_um,
+        na,
+        symmetric: false,
+        noise_override: noise,
+        ..rig.clone()
+    };
     for (label, na, noise) in [
         (
             "ghost-limited: one lens at f/8, 64 frames averaged",
@@ -701,23 +712,22 @@ fn tabletop() {
             averaged,
         ),
         (
-            "aberration-limited: one lens at f/4",
-            0.125,
+            "aberration-limited: one lens at f/2.8",
+            0.18,
             rig.noise_override,
         ),
     ] {
         println!("  {label}");
         for lat in Lattice::ALL {
-            let d = Design {
-                in_lattice: lat,
-                pitch_um: 2.0 * rig.pitch_um,
-                na,
-                symmetric: false,
-                noise_override: noise,
-                ..rig.clone()
-            };
+            let d = small(lat, na, noise);
             let (m, sd) = enob_t(&d, &mut l, Terms::ALL);
-            println!("    {:<32} {:.2} ± {:.2} bits", lat.name(), m, sd);
+            println!(
+                "    {:<32} {:.2} ± {:.2} bits   field {:4.1} mm",
+                lat.name(),
+                m,
+                sd,
+                field_mm(&d, &mut l)
+            );
         }
     }
 }
