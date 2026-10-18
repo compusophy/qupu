@@ -3,3 +3,5 @@
 /node_modules
 .DS_Store
 /docs/photonic/.cache
+/studio/target
+/studio/web/pkg

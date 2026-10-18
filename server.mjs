@@ -1,10 +1,12 @@
-// Tiny static file server for ./web. No deps.
+// Tiny static file server for ./web (or $WEB_ROOT, e.g. studio/web). No deps.
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), 'web');
+const ROOT = process.env.WEB_ROOT
+  ? resolve(process.env.WEB_ROOT)
+  : join(fileURLToPath(new URL('.', import.meta.url)), 'web');
 const PORT = parseInt(process.env.PORT || '8080', 10);
 
 const MIME = {

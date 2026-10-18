@@ -94,3 +94,6 @@ happen.
 - [`docs/photonic/PLAN.md`](docs/photonic/PLAN.md) — project plan for a
   browser-based microring-resonator optical computing simulator (with a
   reproducible back-of-envelope calculator in `docs/photonic/estimates.py`).
+- [`studio/`](studio/README.md) — the photonic design studio: ring physics
+  fitted to measured silicon, a process model that predicts unseen devices,
+  and a live WebGL simulator of a ring weight-bank core.
