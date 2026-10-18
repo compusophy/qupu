@@ -6,6 +6,8 @@
 //!   cargo run --release -- econ    first-principles cost and energy vs GPUs
 //!   cargo run --release -- search  hill-climb glass-engine geometry and
 //!                                  architecture [budget=1600] [bits floor=6]
+//!   cargo run --release -- tabletop  predictions for the tabletop rig
+//!                                  (docs/photonic/TABLETOP.md)
 //!   cargo run --release -- gpu     verify the GPU kernel against its CPU
 //!                                  twin, then benchmark every-symbol speed
 
@@ -33,6 +35,7 @@ fn main() {
                 .unwrap_or(studio::search::DEFAULT_FLOOR),
         ),
         Some("resonances") => resonances(),
+        Some("tabletop") => tabletop(),
         _ => report(),
     }
 }
@@ -576,5 +579,95 @@ fn search(budget: usize, floor: f64) {
             s.tmac_per_usd(),
             s.fj_per_mac()
         );
+    }
+}
+
+/// What the tabletop rig should measure, before anyone buys a part: the
+/// numbers to check the simulator against.
+fn tabletop() {
+    use studio::freespace::{enob_terms, Design, Layouts, Terms};
+    use studio::geometry::Lattice;
+    fn enob_t(d: &Design, l: &mut Layouts, t: Terms) -> (f64, f64) {
+        let e: Vec<f64> = (0..4)
+            .map(|k| enob_terms(d, l, 12, 64, 50 + k, t).0)
+            .collect();
+        let mean = e.iter().sum::<f64>() / 4.0;
+        (
+            mean,
+            (e.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / 3.0).sqrt(),
+        )
+    }
+    let mut l = Layouts::default();
+    let rig = Design::tabletop();
+    println!("Tabletop rig: {}", studio::search::describe(&rig));
+    println!(
+        "  {}×{} weights at {:.0} symbols/s = {:.1} MMAC/s; camera noise {:.1} % of full scale\n",
+        rig.n_in,
+        rig.m_out,
+        rig.baud,
+        (rig.n_in * rig.m_out) as f64 * rig.baud / 1e6,
+        rig.noise_rel() * 100.0
+    );
+
+    println!("Prediction 1: relay symmetry. Same lenses, same field; ENOB (mean ± sd of 4 runs):");
+    for (label, na, sym) in [
+        ("two lenses face to face, f/4", 0.125, true),
+        ("two lenses face to face, f/1.8", 0.28, true),
+        ("one lens, f/8", 0.0625, false),
+        ("one lens, f/4", 0.125, false),
+        ("one lens, f/2.8", 0.18, false),
+        ("one lens, f/1.8", 0.28, false),
+    ] {
+        let d = Design {
+            na,
+            symmetric: sym,
+            ..rig.clone()
+        };
+        let (m, sd) = enob_t(&d, &mut l, Terms::ALL);
+        println!(
+            "  {:<34} {:.2} ± {:.2} bits   edge blur {:>5.1} µm",
+            label,
+            m,
+            sd,
+            d.blur_um(9_000.0)
+        );
+    }
+
+    println!("\nPrediction 2: what limits the rig (ENOB with one source switched off):");
+    let (all, _) = enob_t(&rig, &mut l, Terms::ALL);
+    println!("  {:<34} {:.2} bits", "everything on", all);
+    for (name, t) in Terms::without_each() {
+        let (e, _) = enob_t(&rig, &mut l, t);
+        println!("  without {:<26} {:.2} bits ({:+.2})", name, e, e - all);
+    }
+
+    println!("\nPrediction 3: geometry is software on this rig. Weight cells of 2×2 LCD pixels (94.5 µm)");
+    println!("placed on each lattice (sites rounded to the 47 µm pixel grid in practice):");
+    let averaged = rig.noise_override / 8.0; // 64 frames averaged
+    for (label, na, noise) in [
+        (
+            "ghost-limited: one lens at f/8, 64 frames averaged",
+            0.0625,
+            averaged,
+        ),
+        (
+            "aberration-limited: one lens at f/4",
+            0.125,
+            rig.noise_override,
+        ),
+    ] {
+        println!("  {label}");
+        for lat in Lattice::ALL {
+            let d = Design {
+                in_lattice: lat,
+                pitch_um: 2.0 * rig.pitch_um,
+                na,
+                symmetric: false,
+                noise_override: noise,
+                ..rig.clone()
+            };
+            let (m, sd) = enob_t(&d, &mut l, Terms::ALL);
+            println!("    {:<32} {:.2} ± {:.2} bits", lat.name(), m, sd);
+        }
     }
 }

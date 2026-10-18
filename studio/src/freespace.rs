@@ -192,8 +192,10 @@ impl Design {
         }
     }
 
-    /// The tabletop rig (docs/photonic/TABLETOP.md): a display shows copies
-    /// of the input, a resin-printer LCD is the mask, a camera reads out.
+    /// The tabletop rig (docs/photonic/TABLETOP.md): an HDMI-driven mono
+    /// LCD shows copies of the input, two identical 50 mm lenses face to
+    /// face (a symmetric 1:1 relay, stopped to f/4) image it onto a second,
+    /// identical LCD holding the weights, and a camera reads each tile.
     pub fn tabletop() -> Design {
         Design {
             n_in: 256,
@@ -201,14 +203,14 @@ impl Design {
             in_lattice: Lattice::Square,
             tile_lattice: Lattice::Square,
             order: Ordering::Native,
-            pitch_um: 50.0,
-            fill: 0.75,
-            na: 0.06,
-            symmetric: false,
+            pitch_um: 47.25,
+            fill: 0.8,
+            na: 0.125,
+            symmetric: true,
             replication: Replication::Electronic,
             broadcast: 1,
             h_tree: false,
-            baud: 120.0,
+            baud: 50.0,
             signed: Signed::Offset,
             wavelength_um: 0.53,
             light: 1.0,

@@ -163,6 +163,10 @@ The same rule as before: measure, fit, predict.
      mono camera.
    - It runs at 60–240 symbols/s, which is slow, but it measures what
      matters: precision, crosstalk and calibration at 1000×1000.
+   - **Parts list, procedure and the simulator's predictions for it:**
+     [TABLETOP.md](TABLETOP.md). The costed build is about $450–1,000:
+     two HDMI-driven printer LCDs, two used 50 mm lenses face to face as a
+     symmetric relay, and a mono global-shutter camera.
 2. **Free-space simulator in the studio:** diffraction, aberration,
    crosstalk, mask quantisation and detector noise, fitted to the tabletop
    measurements, like the ring model was fitted to openEBL chips.

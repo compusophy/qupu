@@ -131,8 +131,10 @@ pub fn describe(d: &Design) -> String {
 pub fn fmt_rate(b: f64) -> String {
     if b >= 1e9 {
         format!("{:.2} GBd", b / 1e9)
-    } else {
+    } else if b >= 1e6 {
         format!("{:.0} MBd", b / 1e6)
+    } else {
+        format!("{b:.0} Bd")
     }
 }
 

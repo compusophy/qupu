@@ -25,8 +25,10 @@ cargo run --release                       # fit report, leave-one-out check, pre
 cargo run --release -- core               # core accuracy / energy / simulator speed (CPU)
 cargo run --release -- gpu                # verify the wgpu kernel against its f64 twin; GPU throughput
 cargo run --release -- econ               # first-principles cost / energy vs NVIDIA, AMD, Intel
+cargo run --release -- search             # hill-climb glass-engine geometry and architecture
+cargo run --release -- tabletop           # predictions for the tabletop rig
 cargo run --release --example patterns    # calibration quality per weight pattern
-cargo test --release                      # 13 unit + 5 acceptance + 1 GPU test
+cargo test --release                      # 21 unit + 5 acceptance + 1 GPU test
 
 ./build.sh                                # browser view → web/pkg (needs wasm-bindgen-cli 0.2.129)
 WEB_ROOT=studio/web node server.mjs       # from the repo root, then http://localhost:8080
@@ -130,6 +132,30 @@ E_in/fan-out + E_out/fan-in + light + static + memory. It then compares
 cost to build, 3-year TCO, manufacturing energy and the idiot index
 against H100, B200, MI300X and Gaudi 3. Findings are in
 [docs/photonic/FIRST_PRINCIPLES.md](../docs/photonic/FIRST_PRINCIPLES.md).
+
+## Glass engine: free-space simulator and search
+
+`src/freespace.rs` models a lens-and-mask matrix engine from the optics up:
+- blur and aberration
+- crosstalk
+- diffraction ghosts (periodic lattices) vs a halo (aperiodic ones)
+- receiver noise set by detector light
+- quantisation
+- calibration
+
+`src/geometry.rs` lays pixels on lattices chosen by symmetry group:
+square, hexagonal, Fibonacci sunflower and golden quasi-lattice. It also
+provides Hilbert ordering and H-tree drive.
+
+`src/search.rs` hill-climbs geometry and architecture against compute per $
+and per W at a 6-bit floor.
+
+On paper, the best design so far is 84× a B200 per $ and 52× per joule.
+Results, error budget and caveats are in
+[docs/photonic/GLASS_ENGINE.md](../docs/photonic/GLASS_ENGINE.md). The
+under-$1k tabletop rig that will fit the optics constants, with the
+simulator's predictions for it, is in
+[docs/photonic/TABLETOP.md](../docs/photonic/TABLETOP.md).
 
 ## What is fitted and what is assumed
 
