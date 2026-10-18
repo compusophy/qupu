@@ -28,7 +28,7 @@ cargo run --release -- econ               # first-principles cost / energy vs NV
 cargo run --release -- search             # hill-climb glass-engine geometry and architecture
 cargo run --release -- tabletop           # predictions for the tabletop rig
 cargo run --release --example patterns    # calibration quality per weight pattern
-cargo test --release                      # 21 unit + 5 acceptance + 1 GPU test
+cargo test --release                      # 26 unit + 5 acceptance + 1 GPU test
 
 ./build.sh                                # browser view → web/pkg (needs wasm-bindgen-cli 0.2.129)
 WEB_ROOT=studio/web node server.mjs       # from the repo root, then http://localhost:8080

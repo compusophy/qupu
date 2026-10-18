@@ -131,10 +131,16 @@ need more field for the same spacing: the R2 set needs 2.7× the field of
 hex.
 
 **Where aperiodic order can win.** The tabletop predictions show a regime
-where the aperiodic sunflower wins: small NA, ghost-limited, frame-averaged.
-There, discrete ghosts landing on specific neighbours cost more than a
-diffuse halo. See TABLETOP.md, prediction 3. The prediction is that the
-ranking of symmetry groups flips with the regime.
+where the aperiodic sunflower overtakes hexagonal: small NA, ghost-limited,
+frame-averaged. There, discrete ghosts landing on specific neighbours cost
+more than a diffuse halo. Square, with its larger zero order, stays ahead
+of both. See TABLETOP.md, prediction 3.
+
+**Encoding matters more than geometry.** On the tabletop rig, differential
+tiles with the exposure set per workload are worth 1–6 bits over an offset
+scheme, measured on each workload's own output range (TABLETOP.md,
+prediction 0). The fast design's search already picks between the two
+schemes, but scores them on a dense DCT workload, where the gap is small.
 
 ### Ablation: one gene of the winner changed
 

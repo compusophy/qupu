@@ -20,8 +20,8 @@ to test those.
 
 ```
  green LED    LCD A: inputs        two 50 mm lenses        LCD B: weights      camera + lens
- backlight    (copies of x,     face to face, f/4         (one tile per       (each tile lands
- + diffuser    one per tile)    1:1 symmetric relay        output row)          on a pixel block)
+ backlight    (copies of x,     face to face, f/4         (+ and − tile       (each tile lands
+ + diffuser    one per tile)    1:1 symmetric relay        per output)          on a pixel block)
     ║║║  ───►  ▓▓▓▓▓▓▓▓  ───►  (|  |)═══(|  |)  ───►  ░▒▓░▒▓░▒  ───►   [■]──USB──► computer
                 47.25 µm                                47.25 µm                    (drives A and B
                                                                                     over HDMI)
@@ -29,18 +29,26 @@ to test those.
 
 ## How it computes
 
-1. **LCD A** shows 256 copies of the input vector x, one per tile, each as a
+1. **LCD A** shows 512 copies of the input vector x, one per tile, each as a
    16×16 block of gray levels. This is "electronic replication" in the
    simulator.
 2. **The relay** images LCD A onto LCD B pixel for pixel. Both panels are the
    same model, so a 1:1 relay maps every input pixel onto exactly one weight
    pixel.
-3. **LCD B** holds the weight matrix W, one row per tile. Each pixel
-   transmits x_j·w_ij.
+3. **LCD B** holds the weight matrix W. Each output row gets two tiles: one
+   holding the positive weights w⁺ and one holding the negative weights w⁻.
+   Each pixel transmits xⱼ·wᵢⱼ.
 4. **The camera** images LCD B. All the light from a tile lands on one block
    of camera pixels, and the block's total is that row's dot product.
-5. **Signed weights** use the offset scheme: w is stored as (w+1)/2, and Σx
-   is subtracted afterwards.
+5. **Signed weights are differential:** each output is the positive tile
+   minus the negative tile.
+6. **Exposure is set per workload.** The camera exposure is chosen so that
+   the brightest tile the loaded matrix can produce, with all inputs on,
+   sits near saturation.
+
+Steps 5 and 6 together are worth 1–6 bits on real workloads (prediction 0).
+The obvious alternative wastes most of that: an offset scheme storing
+(w+1)/2, with exposure fixed for an all-open tile.
 
 **Why the camera sum still counts as a measurement.** Summing a block of
 camera pixels in software is equivalent to one large detector, plus extra
@@ -83,9 +91,9 @@ examples, not requirements.
   with 405 nm UV and remove the stock backlight. They work as ordinary
   monochrome LCDs in visible light. LCD B needs no backlight, because the
   relayed image of LCD A is its light.
-- **Field.** A 256×256 matrix at 47.25 µm is 12.1 mm square, well inside a
-  full-frame lens's 43 mm image circle. About 512×512 (24 mm square) still
-  fits; the simulator hasn't been run at that size yet.
+- **Field.** 512 tiles of 16×16 pixels at 47.25 µm, with the gaps the
+  simulator leaves between tiles, cover about 26 mm square (37 mm
+  diagonal). That is inside a full-frame lens's 43 mm image circle.
 - **LCD transmission.** Each panel transmits roughly 5–10 % at full open.
   That suits the rig, because the camera needs very little light.
 
@@ -109,6 +117,9 @@ examples, not requirements.
    - Unmix with the measured couplings.
    - Compute ENOB = log₂(2 / (√12 · rms error)) on the normalised dot
      product (1/n)·Σ wⱼxⱼ. That is the same definition the simulator uses.
+   - For image workloads, also report bits on the workload's own output
+     span, (1/n)·Σ|wⱼ|. That is what prediction 0 uses, and what decides
+     whether a blurred or edge-filtered image comes out clean.
 5. **Repeat across configurations.** Average N frames, change the f-stop,
    swap the relay for one lens, and redraw the lattice. Compare each result
    with the predictions below.
@@ -121,34 +132,58 @@ mean ± sd of 4 simulated runs.
 The model's lens aberration is a generic constant, not a model of any
 particular 50 mm lens. That is one of the things the rig will fit.
 
+**0. Signed encoding and exposure.** This is the largest effect the
+simulator found for this rig. The table gives bits on each workload's own
+output range. Inputs are the demo's scrolling text, orbits, wheel and face.
+
+| Encoding | Blur | Low-pass | Edges | DCT spectrum |
+|---|---|---|---|---|
+| Offset tiles, fixed exposure | 2.08 | 1.03 | 0.18 | 4.27 |
+| Offset tiles, exposure per workload | 2.92 | 2.00 | 1.17 | 4.68 |
+| Differential tiles, fixed exposure | 2.80 | 1.70 | 0.89 | 4.79 |
+| **Differential tiles, exposure per workload (as built)** | **5.55** | **5.91** | **6.09** | **5.77** |
+
+**Mechanism.** A fan-in engine's noise is a fixed fraction of the
+detector's full scale. A blur or band-pass row uses only a few percent of
+an all-open tile's light.
+
+- **Offset encoding** stores a bias of half the light in every pixel. That
+  caps how far the exposure can rise, and with large blur its crosstalk
+  errors add coherently.
+- **Differential tiles** carry only the signal, so the exposure can rise
+  until the workload's brightest tile fills the detector.
+
+Full-scale ENOB (predictions 1–3) hides this. Measured on the scoring
+workload, the as-built rig is at 6.95 bits either way.
+
 **1. Relay symmetry.** Same field, same lenses.
 
 | Relay | Predicted ENOB | Edge blur |
 |---|---|---|
-| Two lenses face to face, f/4 (as built) | 6.46 ± 0.02 | 2.2 µm |
-| Two lenses face to face, f/1.8 | 5.51 ± 0.07 | 6.7 µm |
-| One lens, f/8 | 6.46 ± 0.02 | 3.0 µm |
-| One lens, f/4 | 6.17 ± 0.06 | 6.0 µm |
-| One lens, f/2.8 | 3.86 ± 0.12 | 11.1 µm |
-| One lens, f/1.8 | 2.61 ± 0.11 | 25.8 µm |
+| Two lenses face to face, f/4 (as built) | 6.95 ± 0.03 | 2.2 µm |
+| Two lenses face to face, f/1.8 | 6.66 ± 0.07 | 6.7 µm |
+| One lens, f/8 | 7.01 ± 0.03 | 3.0 µm |
+| One lens, f/4 | 6.80 ± 0.07 | 6.0 µm |
+| One lens, f/2.8 | 6.31 ± 0.09 | 11.1 µm |
+| One lens, f/1.8 | 5.68 ± 0.08 | 25.8 µm |
 
-The claim being tested: the symmetric pair holds about 6.5 bits at a
-2× faster f-number than a single lens, and degrades far more slowly as the
-aperture opens.
+The claim being tested: opened to f/1.8, the symmetric pair loses about
+0.3 bit and a single lens about 1.3 bits. Stopped down to f/8, a single
+lens matches the pair.
 
 **2. What limits the as-built rig.**
 
 | Source switched off | ENOB | Change |
 |---|---|---|
-| None | 6.46 | |
-| Camera noise | 7.79 | +1.33 |
-| Mask and ADC quantisation | 6.56 | +0.10 |
-| Calibration error | 6.48 | +0.02 |
-| Diffraction ghosts | 6.47 | +0.01 |
-| Blur crosstalk | 6.46 | 0.00 |
+| None | 6.95 | |
+| Camera noise | 8.41 | +1.47 |
+| Mask and ADC quantisation | 7.05 | +0.10 |
+| Diffraction ghosts | 6.97 | +0.02 |
+| Calibration error | 6.96 | +0.01 |
+| Blur crosstalk | 6.95 | 0.00 |
 
 Camera noise dominates. Each 4× more frames averaged halves it, which is
-worth up to 1 bit while noise still dominates, saturating near 7.8 bits.
+worth up to 1 bit while noise still dominates, saturating near 8.4 bits.
 Where it actually saturates measures the calibration and quantisation
 floor.
 
@@ -156,30 +191,33 @@ floor.
 cell (94.5 µm) and place the cells on a lattice. Sites are rounded to the
 47 µm pixel grid in practice.
 
-The simulator predicts the ranking *flips* between two regimes:
-
 | Lattice (symmetry group) | Ghost-limited: one lens at f/8, 64 frames averaged | Aberration-limited: one lens at f/4 |
 |---|---|---|
-| Square (p4m) | 7.55 ± 0.14 | 3.96 ± 0.12 |
-| Hexagonal (p6m) | 6.71 ± 0.24 | **4.55 ± 0.09** |
-| Fibonacci sunflower | **7.84 ± 0.06** | 3.26 ± 0.12 |
-| Golden quasi-lattice (R2) | 5.02 ± 0.04 | 1.68 ± 0.10 |
+| Square (p4m) | **8.22 ± 0.07** | 6.32 ± 0.06 |
+| Hexagonal (p6m) | 7.76 ± 0.25 | **6.41 ± 0.07** |
+| Fibonacci sunflower | 7.97 ± 0.06 | 5.91 ± 0.13 |
+| Golden quasi-lattice (R2) | 6.31 ± 0.11 | 5.34 ± 0.34 |
+
+The prediction: square leads or ties in both regimes, while hexagonal and
+the sunflower swap places.
 
 **Mechanism, ghost-limited.** Periodic lattices diffract into discrete
 orders, sharp ghosts that land on specific neighbouring tiles. Calibration
 leaves a 5 % residual on each ghost. An aperiodic sunflower spreads the same
-light into a diffuse halo, whose errors average out.
+light into a diffuse halo, whose errors average out, so it beats
+hexagonal.
 
-Hexagonal suffers most here. Its round equal-area cells pass only half the
-light into the zero order, and it has six orders to square's four.
+Hexagonal suffers most among the periodic lattices. Its round equal-area
+cells pass only half the light into the zero order, and it has six orders
+to square's four. Square's 64 % zero order keeps it ahead of both.
 
 **Mechanism, aberration-limited.** Blur grows with field², so the densest
 packing at a given minimum spacing wins. Hexagonal is the densest circle
 packing. The sunflower and especially the R2 set need more field for the
 same spacing.
 
-The search of the fast design (`search`, below) sits in the second regime,
-which is why it picks hex.
+The search of the fast design ([GLASS_ENGINE.md](GLASS_ENGINE.md)) sits in
+the second regime, which is why it picks hex.
 
 ## Option: a fully optical sum on a line sensor
 

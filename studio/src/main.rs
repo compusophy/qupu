@@ -585,8 +585,9 @@ fn search(budget: usize, floor: f64) {
 /// What the tabletop rig should measure, before anyone buys a part: the
 /// numbers to check the simulator against.
 fn tabletop() {
-    use studio::freespace::{enob_terms, Design, Layouts, Terms};
+    use studio::freespace::{enob_terms, Design, Engine, Layouts, Physics, Signed, Terms};
     use studio::geometry::Lattice;
+    use studio::tabletop::{workload_bits, Workload};
     fn enob_t(d: &Design, l: &mut Layouts, t: Terms) -> (f64, f64) {
         let e: Vec<f64> = (0..4)
             .map(|k| enob_terms(d, l, 12, 64, 50 + k, t).0)
@@ -607,6 +608,55 @@ fn tabletop() {
         rig.baud,
         (rig.n_in * rig.m_out) as f64 * rig.baud / 1e6,
         rig.noise_rel() * 100.0
+    );
+
+    println!(
+        "Prediction 0: signed encoding and exposure. Bits on each workload's own output range"
+    );
+    println!("(the span of (1/n)·Σ w·x over inputs in [0, 1]), on the scrolling-text, orbit, wheel and face inputs:");
+    println!(
+        "  {:<44} {}",
+        "",
+        Workload::ALL.map(|w| format!("{:>9}", w.name())).join("")
+    );
+    for (label, signed, staged) in [
+        ("offset tiles, fixed exposure", Signed::Offset, false),
+        (
+            "offset tiles, exposure set per workload",
+            Signed::Offset,
+            true,
+        ),
+        (
+            "differential tiles, fixed exposure",
+            Signed::Differential,
+            false,
+        ),
+        (
+            "differential tiles, exposure per workload",
+            Signed::Differential,
+            true,
+        ),
+    ] {
+        let d = Design {
+            signed,
+            ..rig.clone()
+        };
+        let bits: Vec<String> = Workload::ALL
+            .iter()
+            .map(|w| {
+                let e = if staged {
+                    Engine::staged(&d, &mut l, w.weights(), 1)
+                } else {
+                    Engine::new(&d, &mut l, w.weights(), 1)
+                };
+                format!("{:>9.2}", workload_bits(&e))
+            })
+            .collect();
+        println!("  {:<44} {}", label, bits.join(""));
+    }
+    println!(
+        "  (as built: differential, exposure per workload; field {:.1} mm square)\n",
+        2.0 * Physics::new(&rig, &mut l, 1).field_radius / 1000.0 / std::f64::consts::SQRT_2
     );
 
     println!("Prediction 1: relay symmetry. Same lenses, same field; ENOB (mean ± sd of 4 runs):");

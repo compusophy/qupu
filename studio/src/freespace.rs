@@ -196,6 +196,7 @@ impl Design {
     /// LCD shows copies of the input, two identical 50 mm lenses face to
     /// face (a symmetric 1:1 relay, stopped to f/4) image it onto a second,
     /// identical LCD holding the weights, and a camera reads each tile.
+    /// Signed weights use a positive and a negative tile per output.
     pub fn tabletop() -> Design {
         Design {
             n_in: 256,
@@ -211,7 +212,7 @@ impl Design {
             broadcast: 1,
             h_tree: false,
             baud: 50.0,
-            signed: Signed::Offset,
+            signed: Signed::Differential,
             wavelength_um: 0.53,
             light: 1.0,
             noise_override: 0.003,
@@ -941,6 +942,292 @@ pub fn enob_terms(
     ((2.0 / (rms * 12f64.sqrt())).log2(), phys)
 }
 
+/// A whole engine running a given weight matrix through the modelled
+/// optics. Every tile's mask is solved against its own kernel and every
+/// detector's couplings are applied, then unmixed with the measured
+/// couplings. `enob` samples a few outputs of a fixed workload to score
+/// designs fast; this runs every output of any matrix, for engines small
+/// enough to hold (the tabletop rig, the browser demo).
+///
+/// Unmixing uses each neighbour's *intended* signal (its target row · x),
+/// which is what a controller actually knows; `enob` uses the true one.
+pub struct Engine {
+    pub design: Design,
+    pub phys: Physics,
+    pub layout: Layout,
+    /// m × n weights in [−1, 1], row-major.
+    pub weights: Vec<f64>,
+    /// Mask transmission per tile per pixel: what the weight mask shows.
+    pub masks: Vec<Vec<f64>>,
+    targets: Vec<Vec<f64>>,
+    rows: Vec<Vec<f64>>,
+    /// Per detector: (true, calibrated) own coupling.
+    own: Vec<(f64, f64)>,
+    /// Per detector: (tile, true, calibrated) for every other coupling.
+    others: Vec<Vec<(usize, f64, f64)>>,
+    /// Per detector: tiles inside the diffuse halo and the calibrated ratio.
+    halo: Vec<(Vec<usize>, f64)>,
+    halo_per: f64,
+    lag: Vec<f64>,
+    fs: f64,
+    /// Detector full scale relative to the all-open nominal (1 unless staged).
+    pub exposure: f64,
+}
+
+/// One symbol through an `Engine`.
+pub struct Readout {
+    /// Measured outputs, (1/n) Σ w·x scale.
+    pub y: Vec<f64>,
+    /// What an exact multiplier would give.
+    pub ideal: Vec<f64>,
+    /// Raw detector reads as a fraction of full scale, per tile.
+    pub detector: Vec<f64>,
+}
+
+impl Engine {
+    pub fn new(design: &Design, layouts: &mut Layouts, weights: Vec<f64>, seed: u64) -> Engine {
+        Engine::build(design, layouts, weights, seed, false)
+    }
+
+    /// As `new`, with the detector full scale staged to this matrix's
+    /// brightest possible tile rather than to an all-open tile.
+    pub fn staged(design: &Design, layouts: &mut Layouts, weights: Vec<f64>, seed: u64) -> Engine {
+        Engine::build(design, layouts, weights, seed, true)
+    }
+
+    fn build(
+        design: &Design,
+        layouts: &mut Layouts,
+        weights: Vec<f64>,
+        seed: u64,
+        staged: bool,
+    ) -> Engine {
+        let (n, m) = (design.n_in, design.m_out);
+        assert_eq!(weights.len(), n * m, "weights must be m × n");
+        let terms = Terms::ALL;
+        let phys = Physics::build(design, layouts, seed, terms);
+        let layout = layouts.get(design.in_lattice, design.order, n).clone();
+        let mut rng = Rng::new(seed ^ 0x5eed);
+        let n_t = phys.tiles.len();
+        let target = |t: usize| -> Vec<f64> {
+            let (o, neg) = match design.signed {
+                Signed::Differential => (t / 2, t % 2 == 1),
+                Signed::Offset => (t, false),
+            };
+            weights[o * n..(o + 1) * n]
+                .iter()
+                .map(|&w| match design.signed {
+                    Signed::Differential => {
+                        if neg {
+                            (-w).max(0.0)
+                        } else {
+                            w.max(0.0)
+                        }
+                    }
+                    Signed::Offset => 0.5 * (w + 1.0),
+                })
+                .collect()
+        };
+        let mut masks = Vec::with_capacity(n_t);
+        let mut rows = Vec::with_capacity(n_t);
+        let mut targets = Vec::with_capacity(n_t);
+        let (mut kdiag_sum, mut kdiag_n) = (0.0f64, 0.0f64);
+        for t in 0..n_t {
+            let k = phys.kernel(&layout, t);
+            let kerr: Vec<Vec<f64>> = k
+                .iter()
+                .enumerate()
+                .map(|(j, row)| {
+                    row.iter()
+                        .map(|e| {
+                            let err = if e.0 == j {
+                                optics::CAL_GAIN_ERROR
+                            } else {
+                                optics::CAL_XTALK_ERROR
+                            };
+                            1.0 + err * rng.gauss()
+                        })
+                        .collect()
+                })
+                .collect();
+            let tg = target(t);
+            let tm = solve_mask(&tg, &k, &kerr, true, terms.quantisation);
+            rows.push(
+                (0..n)
+                    .map(|j| k[j].iter().map(|&(kk, f)| tm[kk] * f).sum())
+                    .collect::<Vec<f64>>(),
+            );
+            for (j, kr) in k.iter().enumerate() {
+                kdiag_sum += kr.iter().find(|e| e.0 == j).map_or(0.0, |e| e.1);
+                kdiag_n += 1.0;
+            }
+            masks.push(tm);
+            targets.push(tg);
+        }
+        let kdiag = kdiag_sum / kdiag_n.max(1.0);
+        let mut own = Vec::with_capacity(n_t);
+        let mut others = Vec::with_capacity(n_t);
+        let mut halo = Vec::with_capacity(n_t);
+        for dt in 0..n_t {
+            let cal: HashMap<usize, f64> = phys.chi_cal[dt].iter().cloned().collect();
+            let mut o = (0.0, 1.0);
+            let mut v = Vec::new();
+            for &(t, f) in &phys.chi[dt] {
+                let fc = cal.get(&t).copied().unwrap_or(f);
+                if t == dt {
+                    o = (f, fc);
+                } else {
+                    v.push((t, f, fc));
+                }
+            }
+            own.push(o);
+            others.push(v);
+            let h = match phys.halo {
+                Some((radius, _)) => {
+                    let here = phys.det[dt];
+                    let inside: Vec<usize> = (0..n_t)
+                        .filter(|&t| {
+                            t != dt
+                                && (phys.det[t].0 - here.0).hypot(phys.det[t].1 - here.1) <= radius
+                        })
+                        .collect();
+                    let count = inside.len() as f64;
+                    // Measured as one aggregate: errors average down as 1/√count.
+                    let ratio = 1.0 + optics::CAL_XTALK_ERROR / count.max(1.0).sqrt() * rng.gauss();
+                    (inside, ratio)
+                }
+                None => (Vec::new(), 1.0),
+            };
+            halo.push(h);
+        }
+        let width_mm = match design.replication {
+            Replication::Optical => 2.0 * layout.radius * phys.pitch / 1000.0,
+            Replication::Electronic => 2.0 * phys.field_radius / 1000.0,
+        };
+        let skew_frac = (drive_skew_s(width_mm, design.h_tree) * design.baud).min(1.0);
+        let xs: Vec<f64> = layout.pts.iter().map(|p| p.0).collect();
+        let (xmin, xmax) = xs
+            .iter()
+            .fold((f64::MAX, f64::MIN), |a, &v| (a.0.min(v), a.1.max(v)));
+        let lag = xs
+            .iter()
+            .map(|x| skew_frac * (x - xmin) / (xmax - xmin).max(1e-9))
+            .collect();
+        let own_mean = own.iter().map(|o| o.0).sum::<f64>() / n_t.max(1) as f64;
+        let halo_per = phys.halo.map_or(0.0, |h| h.1);
+        // Exposure staging: the controller knows the matrix, so it sets the
+        // light (or exposure) to put the brightest tile this workload can
+        // produce, all inputs on, at the detector's full scale. Noise is a
+        // fixed fraction of that full scale, as for any detector run near
+        // saturation.
+        let nominal = n as f64 * kdiag * own_mean;
+        let brightest = rows
+            .iter()
+            .map(|r| r.iter().sum::<f64>())
+            .fold(0.0, f64::max)
+            * own_mean;
+        let fs = if staged {
+            brightest.min(nominal).max(1e-3 * nominal)
+        } else {
+            nominal
+        };
+        Engine {
+            design: design.clone(),
+            fs,
+            exposure: fs / nominal,
+            phys,
+            layout,
+            weights,
+            masks,
+            targets,
+            rows,
+            own,
+            others,
+            halo,
+            halo_per,
+            lag,
+        }
+    }
+
+    /// Number of mask tiles (2m when differential).
+    pub fn tiles(&self) -> usize {
+        self.masks.len()
+    }
+
+    /// One symbol: `x` now, `prev` the symbol before (drive skew mixes them).
+    pub fn run(&self, x: &[f64], prev: &[f64], rng: &mut Rng) -> Readout {
+        let d = &self.design;
+        let (n, m) = (d.n_in, d.m_out);
+        let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(p, q)| p * q).sum::<f64>();
+        let xi: Vec<f64> = (0..n)
+            .map(|j| x[j] + self.lag[j] * (prev[j] - x[j]))
+            .collect();
+        let signal: Vec<f64> = self.rows.iter().map(|r| dot(r, &xi)).collect();
+        let intended: Vec<f64> = self.targets.iter().map(|r| dot(r, x)).collect();
+        let noise_rel = d.noise_rel();
+        let lsb = 1.0 / ((1u32 << optics::ADC_BITS) - 1) as f64;
+        let mut detector = Vec::with_capacity(self.tiles());
+        let est: Vec<f64> = (0..self.tiles())
+            .map(|dt| {
+                let (own_t, own_c) = self.own[dt];
+                let (inside, ratio) = &self.halo[dt];
+                let halo_true: f64 = inside.iter().map(|&t| signal[t]).sum::<f64>() * self.halo_per;
+                let y = own_t * signal[dt]
+                    + self.others[dt]
+                        .iter()
+                        .map(|&(t, f, _)| f * signal[t])
+                        .sum::<f64>()
+                    + halo_true;
+                let noisy = y + noise_rel * self.fs * rng.gauss();
+                let read = ((noisy / self.fs).clamp(0.0, 1.0) / lsb).round() * lsb * self.fs;
+                detector.push(read / self.fs);
+                let known = self.others[dt]
+                    .iter()
+                    .map(|&(t, _, fc)| fc * intended[t])
+                    .sum::<f64>()
+                    + inside.iter().map(|&t| intended[t]).sum::<f64>() * self.halo_per * ratio;
+                (read - known) / own_c
+            })
+            .collect();
+        let sum_x: f64 = x.iter().sum();
+        let y = (0..m)
+            .map(|o| match d.signed {
+                Signed::Differential => (est[2 * o] - est[2 * o + 1]) / n as f64,
+                Signed::Offset => (2.0 * est[o] - sum_x) / n as f64,
+            })
+            .collect();
+        let ideal = (0..m)
+            .map(|o| dot(&self.weights[o * n..(o + 1) * n], x) / n as f64)
+            .collect();
+        Readout { y, ideal, detector }
+    }
+
+    /// Span of each output over all inputs in [0, 1]ⁿ, averaged over
+    /// outputs: (1/n) Σ |w|. Precision *on this matrix* is relative to it.
+    pub fn output_span(&self) -> f64 {
+        let n = self.design.n_in;
+        self.weights.iter().map(|w| w.abs()).sum::<f64>() / (n * self.design.m_out) as f64
+    }
+
+    /// Effective bits on random inputs, the same definition as `enob`.
+    pub fn enob(&self, vectors: usize, seed: u64) -> f64 {
+        let mut rng = Rng::new(seed);
+        let n = self.design.n_in;
+        let mut prev: Vec<f64> = (0..n).map(|_| rng.uniform()).collect();
+        let (mut err, mut count) = (0.0, 0.0);
+        for _ in 0..vectors {
+            let x: Vec<f64> = (0..n).map(|_| rng.uniform()).collect();
+            let r = self.run(&x, &prev, &mut rng);
+            for (a, b) in r.y.iter().zip(&r.ideal) {
+                err += (a - b).powi(2);
+                count += 1.0;
+            }
+            prev = x;
+        }
+        (2.0 / ((err / count).sqrt().max(1e-12) * 12f64.sqrt())).log2()
+    }
+}
+
 /// Throughput, power and cost of a design. Component prices and energies
 /// are assumptions [A]; see docs/photonic/FIRST_PRINCIPLES.md.
 pub fn economics(d: &Design, phys: &Physics, enob: f64) -> Score {
@@ -1032,6 +1319,26 @@ mod tests {
     fn quiet(mut d: Design) -> Design {
         d.noise_override = 1e-6;
         d
+    }
+
+    #[test]
+    fn whole_engine_agrees_with_sampled_score() {
+        // The full engine on the scoring workload should land where the
+        // sampled estimate does (it unmixes with intended, not true,
+        // neighbour signals, so it may be slightly worse).
+        let d = Design::tabletop();
+        let mut l = Layouts::default();
+        let (n, m) = (d.n_in, d.m_out);
+        let w: Vec<f64> = (0..m)
+            .flat_map(|i| (0..n).map(move |j| workload(i, j, n, m)))
+            .collect();
+        let e = Engine::new(&d, &mut l, w, 3);
+        let full = e.enob(24, 5);
+        let (sampled, _) = enob(&d, &mut l, 12, 64, 3);
+        assert!(
+            (full - sampled).abs() < 0.4,
+            "full {full:.2} vs sampled {sampled:.2}"
+        );
     }
 
     #[test]

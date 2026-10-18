@@ -14,6 +14,7 @@
 //!   * `geometry`  — lattices by symmetry group, Hilbert ordering, H-tree skew
 //!   * `freespace` — the glass engine: optics, crosstalk, calibration, score
 //!   * `search`    — hill climbing over geometry and architecture
+//!   * `tabletop`  — the tabletop rig: workloads, inputs, bench genome, LCD map
 //!   * `web`     — the browser view (wasm32 only)
 
 pub mod core;
@@ -27,6 +28,7 @@ pub mod measure;
 pub mod process;
 pub mod ring;
 pub mod search;
+pub mod tabletop;
 
 #[cfg(target_arch = "wasm32")]
 mod web;
