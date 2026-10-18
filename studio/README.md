@@ -11,6 +11,8 @@ measured silicon ──► fitted ring physics ──► process model ──►
                                         (femtosecond clock, energy and precision ledgers)
 ```
 
+![Ring Core Studio: a 16×16 weight bank mid-reload, rings sliding to new weights](web/screenshot.png)
+
 The measured data is the SiEPIC openEBL 2024-10 run: eight double-bus rings
 (radius 3/5/10 µm, gap 70–110 nm) made by Applied Nanotools on 220 nm SOI
 and measured by SiEPIC's automated test station. It is bundled in
