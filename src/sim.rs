@@ -182,12 +182,15 @@ impl Simulator {
                 core.idle_for += dt;
             }
         }
+        let any_completed = !completed.is_empty();
         for (_, tile) in completed {
             self.apply_tile(tile);
             self.tiles_completed += 1;
-            if self.queue.is_empty() && self.all_idle() {
-                self.gates_completed += 1;
-            }
+        }
+        // A gate is done once its last tile lands: count it once, not once
+        // per tile that finished in this tick.
+        if any_completed && self.queue.is_empty() && self.all_idle() {
+            self.gates_completed += 1;
         }
 
         // 2. Idle cores pick up pending tiles (in order).
@@ -306,6 +309,7 @@ mod tests {
         assert!(p(2).abs() < 1e-12);
         assert!((p(3) - 0.5).abs() < 1e-12);
         assert!((s.norm_sq() - 1.0).abs() < 1e-12);
+        assert_eq!(s.gates_completed, 2);
     }
 
     #[test]

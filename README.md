@@ -3,6 +3,9 @@
 A virtual **quantum processing unit** in the browser — and in a native window —
 built end-to-end in Rust.
 
+**Live: <https://qupu.vercel.app>**: pick a preset (Bell, GHZ, QFT, Grover)
+and watch the gates fan out across the cores.
+
 The state-vector simulator and the UI live in the same crate. The renderer
 reads the simulator's own fields directly: `sim.state` is the phasor grid you
 see, `sim.cores[i].busy_for` is the meter that's filling, `sim.queue` is the
