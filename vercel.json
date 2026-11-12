@@ -1,0 +1,6 @@
+{
+  "installCommand": "echo prebuilt",
+  "buildCommand": "echo prebuilt",
+  "outputDirectory": "web",
+  "framework": null
+}
